@@ -73,6 +73,7 @@ func setupRouter(h *handler.Handlers, cfg *config.Config) *gin.Engine {
 	// Agent 流式对话端点 (SSE)
 	r.POST("/api/chat", h.Chat.HandleChat)
 	r.GET("/api/chat/stream", h.Chat.HandleStream)
+	r.POST("/api/chat/tool/confirm", h.Chat.HandleToolConfirmation)
 
 	// 公开路由 (登录/注册)
 	public := r.Group("/api/auth")

@@ -19,6 +19,12 @@ const storageKey = 'model-vendor-config'
 
 const defaultVendors: VendorOption[] = [
   {
+    key: 'openrouter',
+    name: 'OpenRouter',
+    baseURL: 'https://openrouter.ai/api/v1',
+    description: 'OpenRouter 统一模型入口',
+  },
+  {
     key: 'deepseek',
     name: 'DeepSeek',
     baseURL: 'https://api.deepseek.com/v1',
@@ -29,6 +35,12 @@ const defaultVendors: VendorOption[] = [
     name: 'OpenAI',
     baseURL: 'https://api.openai.com/v1',
     description: 'OpenAI 兼容接口',
+  },
+  {
+    key: 'modelscope',
+    name: 'ModelScope',
+    baseURL: 'https://api-inference.modelscope.cn/v1',
+    description: 'ModelScope 开放模型推理接口',
   },
   {
     key: 'ollama',
@@ -45,14 +57,16 @@ const defaultVendors: VendorOption[] = [
 ]
 
 const defaultModelByVendor: Record<string, string> = {
+  openrouter: 'openai/gpt-4o-mini',
   deepseek: 'deepseek-chat',
   openai: 'gpt-4o-mini',
+  modelscope: 'Qwen/Qwen2.5-7B-Instruct',
   ollama: 'qwen2.5',
   custom: '',
 }
 
 function loadConfig(): VendorConfig {
-  const defaultKey = 'deepseek'
+  const defaultKey = 'openrouter'
 
   if (typeof window === 'undefined') {
     return {
@@ -171,10 +185,10 @@ export const useModelVendorStore = defineStore('modelVendor', () => {
   }
 
   function reset() {
-    selectedKey.value = 'deepseek'
+    selectedKey.value = 'openrouter'
     customURL.value = ''
     apiKey.value = ''
-    model.value = defaultModelByVendor.deepseek
+    model.value = defaultModelByVendor.openrouter
     persist()
   }
 

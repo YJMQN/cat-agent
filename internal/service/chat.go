@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"eino-agent/internal/config"
@@ -18,11 +19,22 @@ import (
 
 // ChatService 对话服务 - Agent核心循环
 type ChatService struct {
-	repo           *repository.Repository
-	openaiProvider *model.OpenAIProvider
-	localProvider  *model.LocalModelProvider
-	toolRegistry   *tool.Registry
-	cfg            *config.Config
+	repo              *repository.Repository
+	openaiProvider    *model.OpenAIProvider
+	localProvider     *model.LocalModelProvider
+	toolRegistry      *tool.Registry
+	cfg               *config.Config
+	pendingApprovals  map[string]*PendingToolApproval
+	pendingApprovalsMu sync.Mutex
+}
+
+type PendingToolApproval struct {
+	ID         string
+	UserID     uint
+	SessionID  uint
+	ToolName   string
+	ToolCallID string
+	Arguments  string
 }
 
 // NewChatService 创建对话服务
@@ -34,11 +46,12 @@ func NewChatService(
 	cfg *config.Config,
 ) *ChatService {
 	return &ChatService{
-		repo:           repo,
-		openaiProvider: openaiProvider,
-		localProvider:  localProvider,
-		toolRegistry:   toolRegistry,
-		cfg:            cfg,
+		repo:             repo,
+		openaiProvider:   openaiProvider,
+		localProvider:    localProvider,
+		toolRegistry:     toolRegistry,
+		cfg:              cfg,
+		pendingApprovals: make(map[string]*PendingToolApproval),
 	}
 }
 
@@ -73,6 +86,9 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 	session, err := s.getOrCreateSession(input)
 	if err != nil {
 		return fmt.Errorf("会话处理失败: %w", err)
+	}
+	if eventCh != nil {
+		eventCh <- domain.StreamEvent{Type: "session", Content: fmt.Sprintf("%d", session.ID)}
 	}
 
 	// ========== Step 3: 获取Agent配置 ==========
@@ -109,6 +125,11 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 	toolDefs := s.buildToolDefs(toolNames)
 
 	// ========== Step 8: 选择模型 ==========
+	_, _, _, resolvedModelName, err := s.resolveModelConfig(agentCfg, input)
+	if err != nil {
+		return fmt.Errorf("获取模型失败: %w", err)
+	}
+
 	mdl, err := s.getModel(agentCfg, input)
 	if err != nil {
 		return fmt.Errorf("获取模型失败: %w", err)
@@ -118,7 +139,7 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 	maxIterations := 10 // 防止无限循环
 	for i := 0; i < maxIterations; i++ {
 		req := &model.ChatRequest{
-			Model:       agentCfg.ModelName,
+			Model:       resolvedModelName,
 			Messages:    messages,
 			Tools:       toolDefs,
 			MaxTokens:   agentCfg.MaxTokens,
@@ -156,20 +177,30 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 				}
 			}
 
-			result := s.executeTool(ctx, tc)
+			event, approvalID, err := s.executeTool(ctx, tc, session.ID)
+			if err != nil {
+				return err
+			}
+
+			if event.Type == "tool_confirmation" {
+				if eventCh != nil {
+					eventCh <- *event
+				}
+				if approvalID != "" {
+					go s.updateMemory(input.UserID, session.ID, sanitizedContent)
+					return nil
+				}
+				return nil
+			}
 
 			if eventCh != nil {
-				eventCh <- domain.StreamEvent{
-					Type:    "tool_result",
-					Content: result.Content,
-					Tool:    tc.Function.Name,
-				}
+				eventCh <- *event
 			}
 
 			// 将工具结果添加到消息列表
 			toolResultMsg := model.Message{
 				Role:       "tool",
-				Content:    result.Content,
+				Content:    event.Content,
 				ToolCallID: tc.ID,
 			}
 			messages = append(messages, toolResultMsg)
@@ -178,7 +209,7 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 			s.repo.Message.Create(&domain.Message{
 				SessionID:  session.ID,
 				Role:       "tool",
-				Content:    result.Content,
+				Content:    event.Content,
 				ToolCallID: tc.ID,
 			})
 		}
@@ -333,14 +364,14 @@ func (s *ChatService) handleSyncResponse(
 }
 
 // executeTool 执行工具调用
-func (s *ChatService) executeTool(ctx context.Context, tc model.ToolCall) *domain.StreamEvent {
+func (s *ChatService) executeTool(ctx context.Context, tc model.ToolCall, sessionID uint) (*domain.StreamEvent, string, error) {
 	t, ok := s.toolRegistry.Get(tc.Function.Name)
 	if !ok {
 		return &domain.StreamEvent{
 			Type:    "tool_result",
 			Content: fmt.Sprintf("错误：工具 %s 不存在", tc.Function.Name),
 			Tool:    tc.Function.Name,
-		}
+		}, "", nil
 	}
 
 	// 解析参数
@@ -350,7 +381,7 @@ func (s *ChatService) executeTool(ctx context.Context, tc model.ToolCall) *domai
 			Type:    "tool_result",
 			Content: fmt.Sprintf("错误：解析工具参数失败: %v", err),
 			Tool:    tc.Function.Name,
-		}
+		}, "", nil
 	}
 
 	// 校验参数
@@ -359,27 +390,86 @@ func (s *ChatService) executeTool(ctx context.Context, tc model.ToolCall) *domai
 			Type:    "tool_result",
 			Content: fmt.Sprintf("错误：参数校验失败: %v", err),
 			Tool:    tc.Function.Name,
-		}
+		}, "", nil
 	}
 
-	// 执行工具（带超时）
+	if confirmable, ok := t.(tool.ConfirmableTool); ok && confirmable.RequiresConfirmation(args) {
+		approvalID := uuid.New().String()
+		s.pendingApprovalsMu.Lock()
+		s.pendingApprovals[approvalID] = &PendingToolApproval{
+			ID:         approvalID,
+			SessionID:  sessionID,
+			ToolName:   tc.Function.Name,
+			ToolCallID: tc.ID,
+			Arguments:  tc.Function.Arguments,
+		}
+		s.pendingApprovalsMu.Unlock()
+
+		return &domain.StreamEvent{
+			Type:            "tool_confirmation",
+			Content:         fmt.Sprintf("需要确认才会执行本地命令：%s", tc.Function.Name),
+			Tool:            tc.Function.Name,
+			Args:            tc.Function.Arguments,
+			ConfirmationID:  approvalID,
+		}, approvalID, nil
+	}
+
+	return s.executeToolNow(ctx, tc.Function.Name, tc.Function.Arguments, tc.ID)
+}
+
+func (s *ChatService) executeToolNow(ctx context.Context, toolName string, argsJSON string, toolCallID string) (*domain.StreamEvent, string, error) {
+	t, ok := s.toolRegistry.Get(toolName)
+	if !ok {
+		return &domain.StreamEvent{Type: "tool_result", Content: fmt.Sprintf("错误：工具 %s 不存在", toolName), Tool: toolName}, "", nil
+	}
+
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return &domain.StreamEvent{Type: "tool_result", Content: fmt.Sprintf("错误：解析工具参数失败: %v", err), Tool: toolName}, "", nil
+	}
+
+	if err := tool.ValidateArgs(t, args); err != nil {
+		return &domain.StreamEvent{Type: "tool_result", Content: fmt.Sprintf("错误：参数校验失败: %v", err), Tool: toolName}, "", nil
+	}
+
 	toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	result, err := t.Execute(toolCtx, args)
 	if err != nil {
-		return &domain.StreamEvent{
-			Type:    "tool_result",
-			Content: fmt.Sprintf("工具执行异常: %v", err),
-			Tool:    tc.Function.Name,
-		}
+		return &domain.StreamEvent{Type: "tool_result", Content: fmt.Sprintf("工具执行异常: %v", err), Tool: toolName}, "", nil
 	}
 
-	return &domain.StreamEvent{
-		Type:    "tool_result",
-		Content: result.Content,
-		Tool:    tc.Function.Name,
+	return &domain.StreamEvent{Type: "tool_result", Content: result.Content, Tool: toolName}, "", nil
+}
+
+func (s *ChatService) ExecutePendingTool(approvalID string, approved bool, sessionID uint, userID uint) (*domain.StreamEvent, error) {
+	s.pendingApprovalsMu.Lock()
+	pending, ok := s.pendingApprovals[approvalID]
+	if !ok {
+		s.pendingApprovalsMu.Unlock()
+		return nil, fmt.Errorf("确认请求已失效")
 	}
+	if pending.SessionID == 0 && sessionID > 0 {
+		pending.SessionID = sessionID
+	}
+	delete(s.pendingApprovals, approvalID)
+	s.pendingApprovalsMu.Unlock()
+
+	if !approved {
+		result := "已取消执行"
+		_ = s.repo.Message.Create(&domain.Message{SessionID: pending.SessionID, Role: "tool", Content: result, ToolCallID: pending.ToolCallID})
+		return &domain.StreamEvent{Type: "tool_result", Content: result, Tool: pending.ToolName}, nil
+	}
+
+	event, _, err := s.executeToolNow(context.Background(), pending.ToolName, pending.Arguments, pending.ToolCallID)
+	if err != nil {
+		return nil, err
+	}
+	if event != nil {
+		_ = s.repo.Message.Create(&domain.Message{SessionID: pending.SessionID, Role: "tool", Content: event.Content, ToolCallID: pending.ToolCallID})
+	}
+	return event, nil
 }
 
 // getOrCreateSession 获取或创建会话
@@ -514,28 +604,37 @@ func (s *ChatService) parseToolIDs(toolIDsJSON string) []string {
 
 // resolveModelConfig 解析请求覆盖后的模型配置
 func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *ChatInput) (provider string, baseURL string, apiKey string, modelName string, err error) {
-	provider = agentCfg.ModelProvider
-	modelName = agentCfg.ModelName
+	if agentCfg == nil {
+		return "", "", "", "", fmt.Errorf("Agent配置不能为空")
+	}
 
-	if input != nil {
-		if input.ModelName != "" {
-			modelName = input.ModelName
+	if agentCfg.UseGlobalModelConfig {
+		provider = input.VendorKey
+		baseURL = input.BaseURL
+		apiKey = input.APIKey
+		modelName = input.ModelName
+		if provider == "" {
+			provider = "openrouter"
 		}
-		if input.VendorKey != "" {
-			provider = input.VendorKey
+	} else {
+		provider = agentCfg.ModelProvider
+		modelName = agentCfg.ModelName
+		if provider == "" || modelName == "" {
+			return "", "", "", "", fmt.Errorf("Agent模型配置不完整，请补全模型提供者和模型名称")
 		}
-		if input.BaseURL != "" {
-			baseURL = input.BaseURL
-		}
-		if input.APIKey != "" {
-			apiKey = input.APIKey
-		}
+	}
+
+	if provider == "" {
+		return "", "", "", "", fmt.Errorf("模型提供者不能为空")
 	}
 
 	switch provider {
 	case "deepseek":
 		if baseURL == "" {
 			baseURL = "https://api.deepseek.com/v1"
+		}
+		if modelName == "" {
+			modelName = "deepseek-chat"
 		}
 		return provider, baseURL, apiKey, modelName, nil
 	case "openai":
@@ -545,15 +644,40 @@ func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *Ch
 		if apiKey == "" {
 			apiKey = s.cfg.OpenAIKey
 		}
+		if modelName == "" {
+			modelName = "gpt-4o-mini"
+		}
 		return provider, baseURL, apiKey, modelName, nil
+	case "openrouter":
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api/v1"
+		}
+		if modelName == "" {
+			modelName = "openai/gpt-4o-mini"
+		}
+		return "openai", baseURL, apiKey, modelName, nil
+	case "modelscope":
+		if baseURL == "" {
+			baseURL = "https://api-inference.modelscope.cn/v1"
+		}
+		if modelName == "" {
+			modelName = "Qwen/Qwen2.5-7B-Instruct"
+		}
+		return "openai", baseURL, apiKey, modelName, nil
 	case "custom":
 		if baseURL == "" {
 			return "", "", "", "", fmt.Errorf("自定义链接不能为空")
+		}
+		if modelName == "" {
+			return "", "", "", "", fmt.Errorf("模型名称不能为空")
 		}
 		return "openai", baseURL, apiKey, modelName, nil
 	case "local", "ollama":
 		if baseURL == "" {
 			baseURL = s.cfg.LocalModelURL
+		}
+		if modelName == "" {
+			modelName = "qwen2.5"
 		}
 		return provider, baseURL, apiKey, modelName, nil
 	default:

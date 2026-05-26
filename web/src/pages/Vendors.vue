@@ -12,11 +12,17 @@ const isCustom = computed(() => vendorStore.selectedKey === 'custom')
 
 const modelOptions = computed(() => {
   const vendorKey = vendorStore.selectedKey
+  if (vendorKey === 'openrouter') {
+    return ['openai/gpt-4o-mini', 'openai/gpt-4o', 'deepseek/deepseek-chat', 'anthropic/claude-3.5-sonnet']
+  }
   if (vendorKey === 'deepseek') {
     return ['deepseek-chat', 'deepseek-reasoner']
   }
   if (vendorKey === 'openai') {
     return ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo']
+  }
+  if (vendorKey === 'modelscope') {
+    return ['Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-3B-Instruct', 'Qwen/Qwen2.5-1.5B-Instruct']
   }
   if (vendorKey === 'ollama') {
     return ['qwen2.5', 'llama3', 'deepseek-r1', 'glm4']

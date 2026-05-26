@@ -16,19 +16,20 @@ type User struct {
 
 // AgentConfig Agent配置
 type AgentConfig struct {
-	ID            uint   `json:"id" gorm:"primaryKey"`
-	Name          string `json:"name" gorm:"size:128;not null"`
-	Description   string `json:"description" gorm:"size:512"`
-	ModelProvider string `json:"model_provider" gorm:"size:32;not null"` // openai, local
-	ModelName     string `json:"model_name" gorm:"size:128;not null"`
-	SystemPrompt  string `json:"system_prompt" gorm:"type:text"`
-	MaxTokens     int    `json:"max_tokens" gorm:"default:4096"`
-	Temperature   float64 `json:"temperature" gorm:"default:0.7"`
-	ToolIDs       string `json:"tool_ids" gorm:"type:text"` // JSON array of tool IDs
-	Status        string `json:"status" gorm:"size:16;default:stopped"` // running, stopped
-	CreatedBy     uint   `json:"created_by"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                   uint      `json:"id" gorm:"primaryKey"`
+	Name                 string    `json:"name" gorm:"size:128;not null"`
+	Description          string    `json:"description" gorm:"size:512"`
+	ModelProvider        string    `json:"model_provider" gorm:"size:32"`
+	ModelName            string    `json:"model_name" gorm:"size:128"`
+	UseGlobalModelConfig bool      `json:"use_global_model_config" gorm:"default:false"`
+	SystemPrompt         string    `json:"system_prompt" gorm:"type:text"`
+	MaxTokens            int       `json:"max_tokens" gorm:"default:4096"`
+	Temperature          float64   `json:"temperature" gorm:"default:0.7"`
+	ToolIDs              string    `json:"tool_ids" gorm:"type:text"`             // JSON array of tool IDs
+	Status               string    `json:"status" gorm:"size:16;default:stopped"` // running, stopped
+	CreatedBy            uint      `json:"created_by"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // Tool 工具定义
@@ -68,25 +69,25 @@ type Session struct {
 
 // Message 对话消息
 type Message struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	SessionID uint      `json:"session_id" gorm:"index"`
-	Role      string    `json:"role" gorm:"size:16;not null"` // user, assistant, system, tool
-	Content   string    `json:"content" gorm:"type:text"`
-	ToolCalls string    `json:"tool_calls" gorm:"type:text"` // JSON
-	ToolCallID string   `json:"tool_call_id" gorm:"size:128"`
-	Tokens    int       `json:"tokens" gorm:"default:0"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         uint      `json:"id" gorm:"primaryKey"`
+	SessionID  uint      `json:"session_id" gorm:"index"`
+	Role       string    `json:"role" gorm:"size:16;not null"` // user, assistant, system, tool
+	Content    string    `json:"content" gorm:"type:text"`
+	ToolCalls  string    `json:"tool_calls" gorm:"type:text"` // JSON
+	ToolCallID string    `json:"tool_call_id" gorm:"size:128"`
+	Tokens     int       `json:"tokens" gorm:"default:0"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Memory 长期记忆
 type Memory struct {
-	ID        uint   `json:"id" gorm:"primaryKey"`
-	UserID    uint   `json:"user_id" gorm:"index"`
-	SessionID uint   `json:"session_id"`
-	Category  string `json:"category" gorm:"size:32"` // profile, preference, summary, fact
-	Key       string `json:"key" gorm:"size:256;index"`
-	Content   string `json:"content" gorm:"type:text"`
-	Source    string `json:"source" gorm:"size:32"` // auto, manual
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	UserID    uint      `json:"user_id" gorm:"index"`
+	SessionID uint      `json:"session_id"`
+	Category  string    `json:"category" gorm:"size:32"` // profile, preference, summary, fact
+	Key       string    `json:"key" gorm:"size:256;index"`
+	Content   string    `json:"content" gorm:"type:text"`
+	Source    string    `json:"source" gorm:"size:32"` // auto, manual
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -104,11 +105,11 @@ type AuditLog struct {
 
 // StatsTokenUsage Token用量统计
 type StatsTokenUsage struct {
-	Date     string `json:"date"`
-	Total    int    `json:"total"`
-	Input    int    `json:"input"`
-	Output   int    `json:"output"`
-	AgentID  uint   `json:"agent_id"`
+	Date    string `json:"date"`
+	Total   int    `json:"total"`
+	Input   int    `json:"input"`
+	Output  int    `json:"output"`
+	AgentID uint   `json:"agent_id"`
 }
 
 // ChatRequest 聊天请求
@@ -127,10 +128,11 @@ type ChatResponse struct {
 
 // StreamEvent SSE事件
 type StreamEvent struct {
-	Type    string `json:"type"` // text, tool_call, tool_result, error, done
-	Content string `json:"content"`
-	Tool    string `json:"tool,omitempty"`
-	Args    string `json:"args,omitempty"`
+	Type           string `json:"type"` // text, tool_call, tool_result, tool_confirmation, error, done
+	Content        string `json:"content"`
+	Tool           string `json:"tool,omitempty"`
+	Args           string `json:"args,omitempty"`
+	ConfirmationID string `json:"confirmation_id,omitempty"`
 }
 
 // AdminStats 管理统计数据

@@ -12,8 +12,9 @@ export interface AgentConfig {
   id: number
   name: string
   description: string
-  model_provider: 'openai' | 'local'
+  model_provider: string
   model_name: string
+  use_global_model_config: boolean
   system_prompt: string
   max_tokens: number
   temperature: number
@@ -29,6 +30,7 @@ export interface CreateAgentRequest {
   description?: string
   model_provider: string
   model_name: string
+  use_global_model_config: boolean
   system_prompt?: string
   max_tokens?: number
   temperature?: number
@@ -124,10 +126,11 @@ export interface TokenUsage {
 
 // ========== 流式事件 ==========
 export interface StreamEvent {
-  type: 'text' | 'tool_call' | 'tool_result' | 'error' | 'done'
+  type: 'text' | 'tool_call' | 'tool_result' | 'tool_confirmation' | 'error' | 'done' | 'session'
   content: string
   tool?: string
   args?: string
+  confirmation_id?: string
 }
 
 // ========== API响应 ==========

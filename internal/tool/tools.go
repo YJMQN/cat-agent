@@ -1,13 +1,16 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -28,6 +31,12 @@ type Tool interface {
 	Parameters() map[string]interface{}
 	// Execute 执行工具
 	Execute(ctx context.Context, args map[string]interface{}) (*Result, error)
+}
+
+// ConfirmableTool 需要用户确认的工具接口
+type ConfirmableTool interface {
+	Tool
+	RequiresConfirmation(args map[string]interface{}) bool
 }
 
 // Registry 工具注册表
@@ -84,7 +93,102 @@ func LoadBuiltinTools() *Registry {
 	r.Register(&WeatherTool{})
 	r.Register(&CalculatorTool{})
 	r.Register(&WebSearchTool{})
+	r.Register(&LocalCommandTool{})
 	return r
+}
+
+// ========== 本地命令执行工具 ==========
+
+// LocalCommandTool 在本地系统执行命令
+// 所有命令都需要用户确认后才会执行，以避免误操作。
+type LocalCommandTool struct{}
+
+func (t *LocalCommandTool) Name() string       { return "local_command" }
+func (t *LocalCommandTool) Description() string { return "在本地系统执行命令。为了安全起见，所有命令执行前都会弹出确认。" }
+func (t *LocalCommandTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"command": map[string]interface{}{
+				"type":        "string",
+				"description": "需要执行的命令",
+			},
+			"working_directory": map[string]interface{}{
+				"type":        "string",
+				"description": "可选的工作目录，默认当前目录",
+			},
+			"timeout_seconds": map[string]interface{}{
+				"type":        "integer",
+				"description": "可选的超时时间，单位秒，默认30",
+			},
+		},
+		"required": []string{"command"},
+	}
+}
+
+func (t *LocalCommandTool) RequiresConfirmation(args map[string]interface{}) bool {
+	return true
+}
+
+func (t *LocalCommandTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
+	command, _ := args["command"].(string)
+	if command == "" {
+		return &Result{Content: "错误：缺少命令参数", IsError: true}, nil
+	}
+
+	workingDir, _ := args["working_directory"].(string)
+	if workingDir == "" {
+		workingDir = "."
+	}
+
+	timeoutSeconds := 30
+	if rawTimeout, ok := args["timeout_seconds"].(float64); ok && rawTimeout > 0 {
+		timeoutSeconds = int(rawTimeout)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
+	}
+	cmd.Dir = workingDir
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	stdoutContent := strings.TrimSpace(stdout.String())
+	stderrContent := strings.TrimSpace(stderr.String())
+
+	if err != nil {
+		return &Result{
+			Content: fmt.Sprintf("命令执行失败: %v\nstdout:\n%s\nstderr:\n%s", err, stdoutContent, stderrContent),
+			IsError: true,
+		}, nil
+	}
+
+	if stdoutContent == "" && stderrContent == "" {
+		return &Result{Content: "命令已执行完成，未输出结果"}, nil
+	}
+
+	result := ""
+	if stdoutContent != "" {
+		result += "stdout:\n" + stdoutContent
+	}
+	if stderrContent != "" {
+		if result != "" {
+			result += "\n"
+		}
+		result += "stderr:\n" + stderrContent
+	}
+
+	return &Result{Content: result}, nil
 }
 
 // ========== 天气查询工具 ==========

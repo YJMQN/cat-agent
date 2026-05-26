@@ -36,21 +36,26 @@ func NewAgentService(
 
 // CreateAgentRequest 创建Agent请求
 type CreateAgentRequest struct {
-	Name          string   `json:"name" binding:"required"`
-	Description   string   `json:"description"`
-	ModelProvider string   `json:"model_provider" binding:"required"`
-	ModelName     string   `json:"model_name" binding:"required"`
-	SystemPrompt  string   `json:"system_prompt"`
-	MaxTokens     int      `json:"max_tokens"`
-	Temperature   float64  `json:"temperature"`
-	ToolNames     []string `json:"tool_names"`
+	Name                 string   `json:"name" binding:"required"`
+	Description          string   `json:"description"`
+	ModelProvider        string   `json:"model_provider" binding:"omitempty"`
+	ModelName            string   `json:"model_name" binding:"omitempty"`
+	UseGlobalModelConfig bool     `json:"use_global_model_config"`
+	SystemPrompt         string   `json:"system_prompt"`
+	MaxTokens            int      `json:"max_tokens"`
+	Temperature          float64  `json:"temperature"`
+	ToolNames            []string `json:"tool_names"`
 }
 
 // CreateAgent 创建Agent
 func (s *AgentService) CreateAgent(req *CreateAgentRequest, createdBy uint) (*domain.AgentConfig, error) {
-	// 验证模型是否可用
-	if err := s.validateModel(req.ModelProvider, req.ModelName); err != nil {
-		return nil, err
+	if !req.UseGlobalModelConfig {
+		if req.ModelProvider == "" || req.ModelName == "" {
+			return nil, errors.New("模型提供者和模型名称不能为空")
+		}
+		if err := s.validateModel(req.ModelProvider, req.ModelName); err != nil {
+			return nil, err
+		}
 	}
 
 	// 验证工具是否存在
@@ -63,16 +68,17 @@ func (s *AgentService) CreateAgent(req *CreateAgentRequest, createdBy uint) (*do
 	toolNamesJSON, _ := json.Marshal(req.ToolNames)
 
 	agent := &domain.AgentConfig{
-		Name:          req.Name,
-		Description:   req.Description,
-		ModelProvider: req.ModelProvider,
-		ModelName:     req.ModelName,
-		SystemPrompt:  req.SystemPrompt,
-		MaxTokens:     req.MaxTokens,
-		Temperature:   req.Temperature,
-		ToolIDs:       string(toolNamesJSON),
-		Status:        "stopped",
-		CreatedBy:     createdBy,
+		Name:                 req.Name,
+		Description:          req.Description,
+		ModelProvider:        req.ModelProvider,
+		ModelName:            req.ModelName,
+		UseGlobalModelConfig: req.UseGlobalModelConfig,
+		SystemPrompt:         req.SystemPrompt,
+		MaxTokens:            req.MaxTokens,
+		Temperature:          req.Temperature,
+		ToolIDs:              string(toolNamesJSON),
+		Status:               "stopped",
+		CreatedBy:            createdBy,
 	}
 
 	if agent.MaxTokens == 0 {
@@ -96,13 +102,19 @@ func (s *AgentService) UpdateAgent(id uint, req *CreateAgentRequest) (*domain.Ag
 		return nil, errors.New("Agent不存在")
 	}
 
-	if req.ModelProvider != "" && req.ModelName != "" {
-		if err := s.validateModel(req.ModelProvider, req.ModelName); err != nil {
-			return nil, err
+	if !req.UseGlobalModelConfig {
+		if req.ModelProvider != "" && req.ModelName != "" {
+			if err := s.validateModel(req.ModelProvider, req.ModelName); err != nil {
+				return nil, err
+			}
+			agent.ModelProvider = req.ModelProvider
+			agent.ModelName = req.ModelName
+		} else if req.ModelProvider != "" || req.ModelName != "" {
+			return nil, errors.New("模型提供者和模型名称不能为空")
 		}
-		agent.ModelProvider = req.ModelProvider
-		agent.ModelName = req.ModelName
 	}
+
+	agent.UseGlobalModelConfig = req.UseGlobalModelConfig
 
 	if req.Name != "" {
 		agent.Name = req.Name
@@ -162,6 +174,8 @@ func (s *AgentService) validateModel(provider, modelName string) error {
 		if s.localProvider == nil {
 			return errors.New("本地模型提供者未配置")
 		}
+	case "openrouter", "deepseek":
+		return nil
 	default:
 		return fmt.Errorf("不支持的模型提供者: %s", provider)
 	}

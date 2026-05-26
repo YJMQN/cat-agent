@@ -143,4 +143,7 @@ export const chatApi = {
   send(data: { agent_id: number; session_id?: number; content: string }): Promise<ApiResponse<{ events: unknown[] }>> {
     return request.post('/chat', data)
   },
+  confirmTool(data: { confirmation_id: string; approved: boolean; session_id?: number }): Promise<ApiResponse<{ tool: string; content: string }>> {
+    return request.post('/chat/tool/confirm', data)
+  },
 }

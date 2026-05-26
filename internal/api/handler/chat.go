@@ -205,3 +205,34 @@ func (h *ChatHandler) HandleStreamPost(c *gin.Context) {
 		}
 	})
 }
+
+// HandleToolConfirmation 处理工具执行确认
+func (h *ChatHandler) HandleToolConfirmation(c *gin.Context) {
+	var req struct {
+		ConfirmationID string `json:"confirmation_id" binding:"required"`
+		Approved       bool   `json:"approved"`
+		SessionID      uint   `json:"session_id"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	uid, _ := userID.(uint)
+	if uid == 0 {
+		uid = 1
+	}
+
+	event, err := h.svc.ExecutePendingTool(req.ConfirmationID, req.Approved, req.SessionID, uid)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"tool":    event.Tool,
+		"content": event.Content,
+	}})
+}

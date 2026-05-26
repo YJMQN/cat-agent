@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
-import { agentApi } from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { agentApi, chatApi } from '@/api'
 import { useModelVendorStore } from '@/stores/vendor'
 import type { AgentConfig, StreamEvent } from '@/types'
 
@@ -32,6 +32,23 @@ function scrollToBottom() {
   })
 }
 
+function parseCommandFromArgs(args: string) {
+  if (!args) {
+    return '未提供命令参数'
+  }
+
+  try {
+    const parsed = JSON.parse(args)
+    if (parsed && typeof parsed.command === 'string') {
+      return parsed.command
+    }
+  } catch {
+    // ignore
+  }
+
+  return args
+}
+
 async function sendMessage() {
   const content = inputText.value.trim()
   if (!content || sending.value) return
@@ -47,6 +64,8 @@ async function sendMessage() {
 
   const assistantIdx = messages.value.length
   messages.value.push({ role: 'assistant', content: '', timestamp: new Date() })
+
+  let pendingApproval: { confirmationId: string; tool: string; args: string } | null = null
 
   try {
     const requestConfig = vendorStore.currentRequestConfig
@@ -99,6 +118,9 @@ async function sendMessage() {
           try {
             const event: StreamEvent = JSON.parse(data)
             switch (event.type) {
+              case 'session':
+                sessionId.value = Number(event.content) || 0
+                break
               case 'text':
                 messages.value[assistantIdx].content += event.content
                 scrollToBottom()
@@ -111,6 +133,13 @@ async function sendMessage() {
                   timestamp: new Date(),
                 })
                 scrollToBottom()
+                break
+              case 'tool_confirmation':
+                pendingApproval = {
+                  confirmationId: event.confirmation_id || '',
+                  tool: event.tool || '',
+                  args: event.args || '',
+                }
                 break
               case 'tool_result':
                 messages.value.push({
@@ -134,6 +163,39 @@ async function sendMessage() {
           }
         }
       }
+    }
+
+    if (pendingApproval) {
+      const command = parseCommandFromArgs(pendingApproval.args)
+      let approved = false
+      try {
+        await ElMessageBox.confirm(
+          `即将执行本地命令：\n${command}\n\n是否继续执行？`,
+          '需要确认',
+          {
+            confirmButtonText: '确认执行',
+            cancelButtonText: '取消',
+            type: 'warning',
+          }
+        )
+        approved = true
+      } catch {
+        approved = false
+      }
+
+      const confirmResp = await chatApi.confirmTool({
+        confirmation_id: pendingApproval.confirmationId,
+        approved,
+        session_id: sessionId.value || undefined,
+      })
+
+      messages.value.push({
+        role: 'tool',
+        content: `📋 工具结果: ${confirmResp.data.content}`,
+        tool: pendingApproval.tool,
+        timestamp: new Date(),
+      })
+      scrollToBottom()
     }
   } catch (e: any) {
     messages.value[assistantIdx].content = `❌ 请求失败: ${e.message}`

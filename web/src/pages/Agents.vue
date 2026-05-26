@@ -12,11 +12,15 @@ const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
 
+const defaultAgentProvider = 'openrouter'
+const defaultAgentModel = 'openai/gpt-4o-mini'
+
 const form = ref<CreateAgentRequest>({
   name: '',
   description: '',
-  model_provider: 'openai',
-  model_name: 'gpt-4o-mini',
+  model_provider: defaultAgentProvider,
+  model_name: defaultAgentModel,
+  use_global_model_config: true,
   system_prompt: '你是一个有用的AI助手。',
   max_tokens: 4096,
   temperature: 0.7,
@@ -25,12 +29,12 @@ const form = ref<CreateAgentRequest>({
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入Agent名称', trigger: 'blur' }],
-  model_provider: [{ required: true, message: '请选择模型提供者', trigger: 'change' }],
-  model_name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
 }
 
 const modelPresets = {
+  openrouter: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'deepseek/deepseek-chat'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  modelscope: ['Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-3B-Instruct', 'Qwen/Qwen2.5-1.5B-Instruct'],
   local: ['qwen2.5', 'llama3', 'deepseek-r1', 'glm4'],
 }
 
@@ -54,8 +58,9 @@ function openCreate() {
   form.value = {
     name: '',
     description: '',
-    model_provider: 'openai',
-    model_name: 'gpt-4o-mini',
+    model_provider: defaultAgentProvider,
+    model_name: defaultAgentModel,
+    use_global_model_config: true,
     system_prompt: '你是一个有用的AI助手。',
     max_tokens: 4096,
     temperature: 0.7,
@@ -71,8 +76,9 @@ function openEdit(agent: AgentConfig) {
   form.value = {
     name: agent.name,
     description: agent.description,
-    model_provider: agent.model_provider,
-    model_name: agent.model_name,
+    model_provider: agent.model_provider || defaultAgentProvider,
+    model_name: agent.model_name || defaultAgentModel,
+    use_global_model_config: agent.use_global_model_config,
     system_prompt: agent.system_prompt,
     max_tokens: agent.max_tokens,
     temperature: agent.temperature,
@@ -82,6 +88,11 @@ function openEdit(agent: AgentConfig) {
 }
 
 async function handleSubmit() {
+  if (form.value.use_global_model_config) {
+    form.value.model_provider = defaultAgentProvider
+    form.value.model_name = defaultAgentModel
+  }
+
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
@@ -138,14 +149,23 @@ function parseToolNames(json: string): string[] {
       <el-table :data="agents" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="名称" min-width="120" />
-        <el-table-column prop="model_provider" label="模型提供者" width="110">
+        <el-table-column label="模型来源" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.model_provider === 'openai' ? 'success' : 'info'" size="small">
-              {{ row.model_provider }}
+            <el-tag :type="row.use_global_model_config ? 'success' : 'warning'" size="small">
+              {{ row.use_global_model_config ? '继承全局' : '独立配置' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="model_name" label="模型" width="140" />
+        <el-table-column label="模型提供者" width="130">
+          <template #default="{ row }">
+            <span>{{ row.use_global_model_config ? '继承全局' : row.model_provider }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="模型" width="170">
+          <template #default="{ row }">
+            <span>{{ row.use_global_model_config ? '继承全局' : row.model_name }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="绑定工具" min-width="160">
           <template #default="{ row }">
             <el-tag v-for="t in parseToolNames(row.tool_ids)" :key="t" size="small" style="margin: 2px">{{ t }}</el-tag>
@@ -180,17 +200,27 @@ function parseToolNames(json: string): string[] {
         <el-form-item label="描述">
           <el-input v-model="form.description" placeholder="功能描述" />
         </el-form-item>
-        <el-form-item label="模型提供者" prop="model_provider">
-          <el-select v-model="form.model_provider" style="width: 100%">
-            <el-option label="OpenAI兼容" value="openai" />
-            <el-option label="本地模型(Ollama)" value="local" />
-          </el-select>
+        <el-form-item label="模型配置">
+          <el-switch v-model="form.use_global_model_config" active-text="继承全局配置" inactive-text="使用独立配置" />
+          <div style="color: #909399; font-size: 12px; margin-top: 6px;">
+            {{ form.use_global_model_config ? '当前将使用全局厂商、API Key 和模型设置。' : '当前将使用下面的独立模型配置。' }}
+          </div>
         </el-form-item>
-        <el-form-item label="模型名称" prop="model_name">
-          <el-select v-model="form.model_name" filterable allow-create style="width: 100%" :placeholder="'选择或输入模型'">
-            <el-option v-for="m in modelPresets[form.model_provider as keyof typeof modelPresets] || []" :key="m" :label="m" :value="m" />
-          </el-select>
-        </el-form-item>
+        <template v-if="!form.use_global_model_config">
+          <el-form-item label="模型提供者">
+            <el-select v-model="form.model_provider" style="width: 100%">
+              <el-option label="OpenRouter" value="openrouter" />
+              <el-option label="OpenAI兼容" value="openai" />
+              <el-option label="ModelScope" value="modelscope" />
+              <el-option label="本地模型(Ollama)" value="local" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="模型名称">
+            <el-select v-model="form.model_name" filterable allow-create style="width: 100%" :placeholder="'选择或输入模型'">
+              <el-option v-for="m in modelPresets[form.model_provider as keyof typeof modelPresets] || []" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+        </template>
         <el-form-item label="系统提示词">
           <el-input v-model="form.system_prompt" type="textarea" :rows="4" placeholder="定义Agent的角色和行为" />
         </el-form-item>
