@@ -36,7 +36,7 @@ async function handleLogin() {
     const res = await authApi.login({ username: form.username, password: form.password })
     userStore.setUser(res.data.user, res.data.token)
     ElMessage.success('登录成功')
-    router.push('/dashboard')
+    router.push('/chat')
   } catch {
     // 错误已在拦截器中处理
   } finally {
@@ -49,7 +49,7 @@ async function handleLogin() {
   <div class="login-page">
     <div class="login-card">
       <div class="login-header">
-        <el-icon :size="48" color="#409eff"><Cpu /></el-icon>
+        <el-icon :size="48" color="#6ea96a"><Cpu /></el-icon>
         <h1>Eino Agent</h1>
         <p>AI Agent 管理系统</p>
       </div>
@@ -86,15 +86,16 @@ export default { components: { User, Lock } }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: radial-gradient(circle at top, #eef8ee 0%, #dff1df 48%, #c8e5c7 100%);
 }
 
 .login-card {
   width: 400px;
   padding: 40px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(81, 122, 76, 0.18);
+  border: 1px solid rgba(110, 169, 106, 0.15);
 }
 
 .login-header {
@@ -105,11 +106,11 @@ export default { components: { User, Lock } }
 .login-header h1 {
   margin: 12px 0 4px;
   font-size: 24px;
-  color: #303133;
+  color: #1f3224;
 }
 
 .login-header p {
-  color: #909399;
+  color: #5f6f5f;
   font-size: 14px;
 }
 
@@ -119,7 +120,7 @@ export default { components: { User, Lock } }
 }
 
 .login-footer p {
-  color: #909399;
+  color: #5f6f5f;
   font-size: 12px;
 }
 </style>

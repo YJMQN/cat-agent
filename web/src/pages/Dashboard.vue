@@ -46,7 +46,7 @@ function formatNumber(n: number): string {
     <el-row :gutter="20" class="stat-cards">
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #e8f5e9"><el-icon :size="28" color="#4caf50"><ChatDotRound /></el-icon></div>
+          <div class="stat-icon" style="background: #eef8ee"><el-icon :size="28" color="#6ea96a"><ChatDotRound /></el-icon></div>
           <div class="stat-info">
             <div class="stat-value">{{ formatNumber(stats.total_sessions) }}</div>
             <div class="stat-label">总会话数</div>
@@ -55,7 +55,7 @@ function formatNumber(n: number): string {
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #e3f2fd"><el-icon :size="28" color="#2196f3"><Comment /></el-icon></div>
+          <div class="stat-icon" style="background: #e8f5e6"><el-icon :size="28" color="#6ea96a"><Comment /></el-icon></div>
           <div class="stat-info">
             <div class="stat-value">{{ formatNumber(stats.total_messages) }}</div>
             <div class="stat-label">总消息数</div>
@@ -64,7 +64,7 @@ function formatNumber(n: number): string {
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #fff3e0"><el-icon :size="28" color="#ff9800"><Coin /></el-icon></div>
+          <div class="stat-icon" style="background: #edf9eb"><el-icon :size="28" color="#6ea96a"><Coin /></el-icon></div>
           <div class="stat-info">
             <div class="stat-value">{{ formatNumber(stats.total_tokens) }}</div>
             <div class="stat-label">Token消耗</div>
@@ -73,7 +73,7 @@ function formatNumber(n: number): string {
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #fce4ec"><el-icon :size="28" color="#e91e63"><Connection /></el-icon></div>
+          <div class="stat-icon" style="background: #ebf6e8"><el-icon :size="28" color="#6ea96a"><Connection /></el-icon></div>
           <div class="stat-info">
             <div class="stat-value">{{ stats.active_sessions }}</div>
             <div class="stat-label">活跃会话</div>
@@ -196,7 +196,7 @@ function formatNumber(n: number): string {
 
 .bar-fill {
   width: 100%;
-  background: linear-gradient(180deg, #409eff, #79bbff);
+  background: linear-gradient(180deg, #8ccf7d, #6ea96a);
   border-radius: 4px 4px 0 0;
   min-height: 4px;
   transition: height 0.3s;
@@ -235,7 +235,7 @@ function formatNumber(n: number): string {
 }
 
 .rank-badge.top {
-  background: linear-gradient(135deg, #f7ba2a, #f56c6c);
+  background: linear-gradient(135deg, #8bcf7d, #6ea96a);
   color: #fff;
 }
 

@@ -28,6 +28,10 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 		AgentID   uint   `json:"agent_id" binding:"required"`
 		SessionID uint   `json:"session_id"`
 		Content   string `json:"content" binding:"required"`
+		VendorKey string `json:"vendor_key"`
+		BaseURL   string `json:"base_url"`
+		APIKey    string `json:"api_key"`
+		ModelName string `json:"model_name"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -47,6 +51,10 @@ func (h *ChatHandler) HandleChat(c *gin.Context) {
 		SessionID: req.SessionID,
 		UserID:    uid,
 		Content:   req.Content,
+		VendorKey: req.VendorKey,
+		BaseURL:   req.BaseURL,
+		APIKey:    req.APIKey,
+		ModelName: req.ModelName,
 	}
 
 	// 收集所有事件
@@ -69,6 +77,10 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 	agentID := c.Query("agent_id")
 	sessionID := c.Query("session_id")
 	content := c.Query("content")
+	vendorKey := c.Query("vendor_key")
+	baseURL := c.Query("vendor_base_url")
+	apiKey := c.Query("vendor_api_key")
+	modelName := c.Query("vendor_model")
 
 	if content == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少content参数"})
@@ -103,6 +115,10 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 		SessionID: sessionIDUint,
 		UserID:    uid,
 		Content:   content,
+		VendorKey: vendorKey,
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		ModelName: modelName,
 	}
 
 	eventCh := make(chan domain.StreamEvent, 64)
@@ -134,6 +150,10 @@ func (h *ChatHandler) HandleStreamPost(c *gin.Context) {
 		AgentID   uint   `json:"agent_id" binding:"required"`
 		SessionID uint   `json:"session_id"`
 		Content   string `json:"content" binding:"required"`
+		VendorKey string `json:"vendor_key"`
+		BaseURL   string `json:"base_url"`
+		APIKey    string `json:"api_key"`
+		ModelName string `json:"model_name"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -158,6 +178,10 @@ func (h *ChatHandler) HandleStreamPost(c *gin.Context) {
 		SessionID: req.SessionID,
 		UserID:    uid,
 		Content:   req.Content,
+		VendorKey: req.VendorKey,
+		BaseURL:   req.BaseURL,
+		APIKey:    req.APIKey,
+		ModelName: req.ModelName,
 	}
 
 	eventCh := make(chan domain.StreamEvent, 64)

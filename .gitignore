@@ -2,6 +2,7 @@ node_modules
 web/dist
 data/
 server
+.devlogs
 
 package-lock.json
 go.sum

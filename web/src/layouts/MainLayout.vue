@@ -9,11 +9,12 @@ const userStore = useUserStore()
 const isCollapse = ref(false)
 
 const menuItems = [
+  { path: '/chat', icon: 'Promotion', title: '对话测试' },
+  { path: '/vendors', icon: 'Setting', title: '模型厂商' },
   { path: '/dashboard', icon: 'DataBoard', title: '数据概览' },
   { path: '/agents', icon: 'Robot', title: 'Agent管理' },
   { path: '/tools', icon: 'SetUp', title: '工具管理' },
   { path: '/sessions', icon: 'ChatDotRound', title: '对话监控' },
-  { path: '/chat', icon: 'Promotion', title: '对话测试' },
   { path: '/memories', icon: 'Coin', title: '记忆管理' },
   { path: '/users', icon: 'User', title: '用户管理' },
 ]
@@ -35,16 +36,16 @@ function handleLogout() {
     <!-- 侧边栏 -->
     <el-aside :width="isCollapse ? '64px' : '220px'" class="aside">
       <div class="logo" @click="router.push('/dashboard')">
-        <el-icon :size="28" color="#409eff"><Cpu /></el-icon>
+        <el-icon :size="28" color="#6ea96a"><Cpu /></el-icon>
         <span v-show="!isCollapse" class="logo-text">Eino Agent</span>
       </div>
 
       <el-menu
         :default-active="activeMenu"
         :collapse="isCollapse"
-        background-color="#1d1e1f"
-        text-color="#bfcbd9"
-        active-text-color="#409eff"
+        background-color="transparent"
+        text-color="#4f6a52"
+        active-text-color="#2f5b36"
         router
         class="side-menu"
       >
@@ -103,7 +104,8 @@ function handleLogout() {
 }
 
 .aside {
-  background-color: #1d1e1f;
+  background: linear-gradient(180deg, #f8fcf7 0%, #f2f8f0 100%);
+  border-right: 1px solid #dbe9db;
   transition: width 0.3s;
   display: flex;
   flex-direction: column;
@@ -117,14 +119,15 @@ function handleLogout() {
   justify-content: center;
   gap: 10px;
   cursor: pointer;
-  border-bottom: 1px solid #2d2d2d;
+  border-bottom: 1px solid #dbe9db;
   flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .logo-text {
-  color: #fff;
+  color: #2f5b36;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -132,6 +135,22 @@ function handleLogout() {
   flex: 1;
   border-right: none;
   overflow-y: auto;
+  padding: 12px 0;
+  background: transparent !important;
+}
+
+.side-menu :deep(.el-menu-item) {
+  margin: 4px 10px;
+  border-radius: 12px;
+}
+
+.side-menu :deep(.el-menu-item:hover) {
+  background: rgba(226, 240, 223, 0.95) !important;
+}
+
+.side-menu :deep(.el-menu-item.is-active) {
+  background: rgba(220, 239, 217, 0.98) !important;
+  color: #2f5b36 !important;
 }
 
 .collapse-btn {
@@ -139,19 +158,19 @@ function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #bfcbd9;
+  color: #5f6f5f;
   cursor: pointer;
-  border-top: 1px solid #2d2d2d;
+  border-top: 1px solid #dbe9db;
   flex-shrink: 0;
 }
 
 .collapse-btn:hover {
-  color: #409eff;
+  color: #2f5b36;
 }
 
 .header {
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  background: rgba(255, 255, 255, 0.95);
+  border-bottom: 1px solid #dbe9db;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -161,7 +180,7 @@ function handleLogout() {
 .header-left h2 {
   font-size: 18px;
   font-weight: 500;
-  color: #303133;
+  color: #1f3224;
 }
 
 .user-dropdown {
@@ -169,16 +188,16 @@ function handleLogout() {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  color: #606266;
+  color: #5f6f5f;
   font-size: 14px;
 }
 
 .user-dropdown:hover {
-  color: #409eff;
+  color: #517a4c;
 }
 
 .main {
-  background: #f0f2f5;
+  background: linear-gradient(180deg, #f8fcf7 0%, #eef8ee 100%);
   padding: 20px;
   overflow-y: auto;
 }

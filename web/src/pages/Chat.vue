@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { agentApi, chatApi } from '@/api'
+import { agentApi } from '@/api'
+import { useModelVendorStore } from '@/stores/vendor'
 import type { AgentConfig, StreamEvent } from '@/types'
 
 const agents = ref<AgentConfig[]>([])
+const vendorStore = useModelVendorStore()
 const selectedAgentId = ref<number>(0)
 const sessionId = ref<number>(0)
 const inputText = ref('')
@@ -38,24 +40,31 @@ async function sendMessage() {
     return
   }
 
-  // 添加用户消息
   messages.value.push({ role: 'user', content, timestamp: new Date() })
   inputText.value = ''
   sending.value = true
   scrollToBottom()
 
-  // 添加助手消息占位
   const assistantIdx = messages.value.length
   messages.value.push({ role: 'assistant', content: '', timestamp: new Date() })
 
   try {
-    // 使用SSE流式接收
+    const requestConfig = vendorStore.currentRequestConfig
     const params = new URLSearchParams({
       agent_id: selectedAgentId.value.toString(),
-      content: content,
+      content,
+      vendor_key: requestConfig.vendorKey,
+      vendor_model: requestConfig.model,
     })
+
     if (sessionId.value) {
       params.set('session_id', sessionId.value.toString())
+    }
+    if (requestConfig.baseURL) {
+      params.set('vendor_base_url', requestConfig.baseURL)
+    }
+    if (requestConfig.apiKey) {
+      params.set('vendor_api_key', requestConfig.apiKey)
     }
 
     const token = localStorage.getItem('token')
@@ -83,7 +92,6 @@ async function sendMessage() {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           let data = line.slice(6).trim()
-          // 去掉可能的引号包裹
           if (data.startsWith('"') && data.endsWith('"')) {
             try { data = JSON.parse(data) } catch { /* keep raw */ }
           }
@@ -120,7 +128,6 @@ async function sendMessage() {
                 break
             }
           } catch {
-            // 非JSON数据，直接追加
             if (data && data !== '[DONE]') {
               messages.value[assistantIdx].content += data
             }
@@ -155,11 +162,13 @@ function formatTime(d: Date) {
     <el-card shadow="never" class="chat-card">
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
-          <div style="display: flex; align-items: center; gap: 16px">
+          <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
             <span>对话测试</span>
             <el-select v-model="selectedAgentId" placeholder="选择Agent" size="small" style="width: 200px">
               <el-option v-for="a in agents" :key="a.id" :label="a.name" :value="a.id" />
             </el-select>
+            <el-tag type="success">当前厂商：{{ vendorStore.currentLabel }}</el-tag>
+            <el-tag type="info">当前模型：{{ vendorStore.currentModel }}</el-tag>
           </div>
           <el-button size="small" @click="clearChat"><el-icon><Delete /></el-icon>清空</el-button>
         </div>
@@ -266,12 +275,12 @@ function formatTime(d: Date) {
 }
 
 .chat-msg.user .msg-avatar {
-  background: #409eff;
+  background: #6ea96a;
   color: #fff;
 }
 
 .chat-msg.assistant .msg-avatar {
-  background: #67c23a;
+  background: #8bcf7d;
   color: #fff;
 }
 
@@ -302,12 +311,12 @@ function formatTime(d: Date) {
 }
 
 .chat-msg.user .msg-text {
-  background: #ecf5ff;
-  color: #303133;
+  background: #eef8ee;
+  color: #1f3224;
 }
 
 .chat-msg.assistant .msg-text {
-  background: #f0f9eb;
+  background: #f2faf1;
 }
 
 .chat-msg.tool .msg-text {

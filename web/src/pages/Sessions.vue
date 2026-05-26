@@ -65,7 +65,12 @@ function handlePageChange(p: number) {
 }
 
 function getRoleTag(role: string) {
-  const map: Record<string, string> = { user: '', assistant: 'success', system: 'warning', tool: 'info' }
+  const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    user: 'primary',
+    assistant: 'success',
+    system: 'warning',
+    tool: 'info',
+  }
   return map[role] || 'info'
 }
 
@@ -198,13 +203,13 @@ function formatTime(t: string) {
 }
 
 .session-item:hover {
-  border-color: #409eff;
-  background: #f0f7ff;
+  border-color: #6ea96a;
+  background: #eef8ee;
 }
 
 .session-item.active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: #6ea96a;
+  background: #e8f5e7;
 }
 
 .session-title {
@@ -246,11 +251,11 @@ function formatTime(t: string) {
 }
 
 .message-item.user {
-  border-left: 3px solid #409eff;
+  border-left: 3px solid #6ea96a;
 }
 
 .message-item.assistant {
-  border-left: 3px solid #67c23a;
+  border-left: 3px solid #8bcf7d;
 }
 
 .message-item.system {

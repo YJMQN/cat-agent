@@ -10,8 +10,20 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
-    redirect: '/dashboard',
+    redirect: '/chat',
     children: [
+      {
+        path: 'chat',
+        name: 'Chat',
+        component: () => import('@/pages/Chat.vue'),
+        meta: { title: '对话测试', icon: 'Promotion' },
+      },
+      {
+        path: 'vendors',
+        name: 'Vendors',
+        component: () => import('@/pages/Vendors.vue'),
+        meta: { title: '模型厂商', icon: 'Setting' },
+      },
       {
         path: 'dashboard',
         name: 'Dashboard',
@@ -35,12 +47,6 @@ const routes: RouteRecordRaw[] = [
         name: 'Sessions',
         component: () => import('@/pages/Sessions.vue'),
         meta: { title: '对话监控', icon: 'ChatDotRound' },
-      },
-      {
-        path: 'chat',
-        name: 'Chat',
-        component: () => import('@/pages/Chat.vue'),
-        meta: { title: '对话测试', icon: 'Promotion' },
       },
       {
         path: 'memories',
@@ -69,7 +75,7 @@ router.beforeEach((to, _from, next) => {
   if (!to.meta.public && !token) {
     next('/login')
   } else if (to.path === '/login' && token) {
-    next('/dashboard')
+    next('/chat')
   } else {
     document.title = `${to.meta.title || 'Eino Agent'} - 管理系统`
     next()

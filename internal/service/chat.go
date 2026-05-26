@@ -48,11 +48,15 @@ type ChatInput struct {
 	SessionID uint   `json:"session_id"`
 	UserID    uint   `json:"user_id"`
 	Content   string `json:"content"`
+	VendorKey string `json:"vendor_key"`
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	ModelName string `json:"model_name"`
 }
 
 // ChatOutput 对话输出
 type ChatOutput struct {
-	SessionID uint           `json:"session_id"`
+	SessionID uint                 `json:"session_id"`
 	Events    []domain.StreamEvent `json:"events,omitempty"`
 }
 
@@ -105,7 +109,7 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 	toolDefs := s.buildToolDefs(toolNames)
 
 	// ========== Step 8: 选择模型 ==========
-	mdl, err := s.getModel(agentCfg)
+	mdl, err := s.getModel(agentCfg, input)
 	if err != nil {
 		return fmt.Errorf("获取模型失败: %w", err)
 	}
@@ -172,9 +176,9 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 
 			// 保存工具结果消息
 			s.repo.Message.Create(&domain.Message{
-				SessionID: session.ID,
-				Role:      "tool",
-				Content:   result.Content,
+				SessionID:  session.ID,
+				Role:       "tool",
+				Content:    result.Content,
 				ToolCallID: tc.ID,
 			})
 		}
@@ -508,15 +512,69 @@ func (s *ChatService) parseToolIDs(toolIDsJSON string) []string {
 	return ids
 }
 
-// getModel 根据配置获取模型实例
-func (s *ChatService) getModel(agentCfg *domain.AgentConfig) (model.Model, error) {
-	switch agentCfg.ModelProvider {
+// resolveModelConfig 解析请求覆盖后的模型配置
+func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *ChatInput) (provider string, baseURL string, apiKey string, modelName string, err error) {
+	provider = agentCfg.ModelProvider
+	modelName = agentCfg.ModelName
+
+	if input != nil {
+		if input.ModelName != "" {
+			modelName = input.ModelName
+		}
+		if input.VendorKey != "" {
+			provider = input.VendorKey
+		}
+		if input.BaseURL != "" {
+			baseURL = input.BaseURL
+		}
+		if input.APIKey != "" {
+			apiKey = input.APIKey
+		}
+	}
+
+	switch provider {
+	case "deepseek":
+		if baseURL == "" {
+			baseURL = "https://api.deepseek.com/v1"
+		}
+		return provider, baseURL, apiKey, modelName, nil
 	case "openai":
-		return s.openaiProvider.Create(agentCfg.ModelName)
-	case "local":
-		return s.localProvider.Create(agentCfg.ModelName)
+		if baseURL == "" {
+			baseURL = s.cfg.OpenAIBase
+		}
+		if apiKey == "" {
+			apiKey = s.cfg.OpenAIKey
+		}
+		return provider, baseURL, apiKey, modelName, nil
+	case "custom":
+		if baseURL == "" {
+			return "", "", "", "", fmt.Errorf("自定义链接不能为空")
+		}
+		return "openai", baseURL, apiKey, modelName, nil
+	case "local", "ollama":
+		if baseURL == "" {
+			baseURL = s.cfg.LocalModelURL
+		}
+		return provider, baseURL, apiKey, modelName, nil
 	default:
-		return nil, fmt.Errorf("不支持的模型提供者: %s", agentCfg.ModelProvider)
+		return "", "", "", "", fmt.Errorf("不支持的模型提供者: %s", provider)
+	}
+}
+
+// getModel 根据配置获取模型实例
+func (s *ChatService) getModel(agentCfg *domain.AgentConfig, input *ChatInput) (model.Model, error) {
+	provider, baseURL, apiKey, modelName, err := s.resolveModelConfig(agentCfg, input)
+	if err != nil {
+		return nil, err
+	}
+
+	switch provider {
+	case "openai":
+		return model.NewOpenAIProvider(baseURL, apiKey).Create(modelName)
+	case "local", "ollama":
+		return model.NewLocalModelProvider(baseURL).Create(modelName)
+	default:
+		return nil, fmt.Errorf("不支持的模型提供者: %s", provider)
 	}
 }
 
