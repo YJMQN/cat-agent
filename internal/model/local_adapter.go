@@ -171,10 +171,10 @@ func (m *LocalModel) StreamChat(ctx context.Context, req *ChatRequest) (<-chan S
 	return chunks, nil
 }
 
-func (m *LocalModel) convertRequest(req *ChatRequest) *ollamaRequest {
+func (m *LocalModel) convertRequest(req *ChatRequest, stream bool) *ollamaRequest {
 	ollamaReq := &ollamaRequest{
 		Model:  m.model,
-		Stream: req.Stream,
+		Stream: stream,
 	}
 
 	for _, msg := range req.Messages {

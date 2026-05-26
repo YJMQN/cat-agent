@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -40,7 +41,9 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	}
 
 	// 创建默认管理员账户
-	initDefaultAdmin(db)
+	if err := initDefaultAdmin(db); err != nil {
+		return nil, fmt.Errorf("初始化默认管理员失败: %w", err)
+	}
 
 	// 注册内置工具
 	initBuiltinTools(db)
@@ -48,17 +51,31 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	return db, nil
 }
 
-func initDefaultAdmin(db *gorm.DB) {
-	var count int64
-	db.Model(&domain.User{}).Count(&count)
-	if count == 0 {
-		// 默认密码 admin123, 实际部署应修改
-		db.Create(&domain.User{
-			Username: "admin",
-			Password: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy", // bcrypt of admin123
-			Role:     "admin",
-		})
+func initDefaultAdmin(db *gorm.DB) error {
+	const (
+		defaultAdminUsername = "admin"
+		defaultAdminPassword = "admin123"
+		legacyBadHash        = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+	)
+
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(defaultAdminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
 	}
+
+	var user domain.User
+	if err := db.Where("username = ?", defaultAdminUsername).First(&user).Error; err == nil {
+		if user.Password == legacyBadHash {
+			return db.Model(&domain.User{}).Where("id = ?", user.ID).Update("password", string(hashedPwd)).Error
+		}
+		return nil
+	}
+
+	return db.Create(&domain.User{
+		Username: defaultAdminUsername,
+		Password: string(hashedPwd),
+		Role:     "admin",
+	}).Error
 }
 
 func initBuiltinTools(db *gorm.DB) {

@@ -138,7 +138,7 @@ async function runTest() {
             </div>
             <p class="tool-desc">{{ tool.description || '暂无描述' }}</p>
             <div class="tool-actions">
-              <el-button size="small" @click="openTest(tool)" :disabled="!enabled">测试</el-button>
+              <el-button size="small" @click="openTest(tool)" :disabled="!tool.enabled">测试</el-button>
               <el-button size="small" @click="openEdit(tool)">编辑</el-button>
               <el-button size="small" type="danger" @click="handleDelete(tool.id)">删除</el-button>
             </div>

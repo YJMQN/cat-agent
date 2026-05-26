@@ -264,10 +264,16 @@ type statsRepo struct{ db *gorm.DB }
 
 func (r *statsRepo) Overview() (*domain.AdminStats, error) {
 	stats := &domain.AdminStats{}
-	r.db.Model(&domain.Session{}).Count(&stats.TotalSessions) // nolint
-	r.db.Model(&domain.Message{}).Count(&stats.TotalMessages) // nolint
-	r.db.Model(&domain.User{}).Count(&stats.TotalUsers)       // nolint
-	r.db.Model(&domain.Session{}).Where("status = ?", "active").Count(&stats.ActiveSessions) // nolint
+
+	var totalSessions, totalMessages, totalUsers, activeSessions int64
+	r.db.Model(&domain.Session{}).Count(&totalSessions) // nolint
+	r.db.Model(&domain.Message{}).Count(&totalMessages) // nolint
+	r.db.Model(&domain.User{}).Count(&totalUsers)       // nolint
+	r.db.Model(&domain.Session{}).Where("status = ?", "active").Count(&activeSessions) // nolint
+	stats.TotalSessions = int(totalSessions)
+	stats.TotalMessages = int(totalMessages)
+	stats.TotalUsers = int(totalUsers)
+	stats.ActiveSessions = int(activeSessions)
 
 	// 计算总token
 	r.db.Model(&domain.Message{}).Select("COALESCE(SUM(tokens),0)").Scan(&stats.TotalTokens) // nolint

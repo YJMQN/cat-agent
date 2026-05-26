@@ -182,7 +182,7 @@ function formatTime(d: Date) {
               <span class="msg-role">{{ msg.role === 'user' ? '我' : msg.role === 'assistant' ? 'Agent' : '系统' }}</span>
               <span class="msg-time">{{ formatTime(msg.timestamp) }}</span>
             </div>
-            <div class="msg-text">{{ msg.content || (sending.value && idx === messages.length - 1 ? '思考中...' : '') }}</div>
+            <div class="msg-text">{{ msg.content || (sending && idx === messages.length - 1 ? '思考中...' : '') }}</div>
           </div>
         </div>
       </div>

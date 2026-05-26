@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"eino-agent/internal/domain"
@@ -112,7 +113,7 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 	}()
 
 	// 流式写入SSE
-	c.Stream(func(w fmt.Stringer) bool {
+	c.Stream(func(w io.Writer) bool {
 		select {
 		case event, ok := <-eventCh:
 			if !ok {
@@ -120,7 +121,7 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 			}
 			data, _ := json.Marshal(event)
 			c.SSEvent("message", string(data))
-			return !event.Done
+			return event.Type != "done"
 		case <-c.Request.Context().Done():
 			return false
 		}
@@ -166,7 +167,7 @@ func (h *ChatHandler) HandleStreamPost(c *gin.Context) {
 		h.svc.HandleChat(c.Request.Context(), input, eventCh)
 	}()
 
-	c.Stream(func(w fmt.Stringer) bool {
+	c.Stream(func(w io.Writer) bool {
 		select {
 		case event, ok := <-eventCh:
 			if !ok {
@@ -174,7 +175,7 @@ func (h *ChatHandler) HandleStreamPost(c *gin.Context) {
 			}
 			data, _ := json.Marshal(event)
 			c.SSEvent("message", string(data))
-			return !event.Done
+			return event.Type != "done"
 		case <-c.Request.Context().Done():
 			return false
 		}
