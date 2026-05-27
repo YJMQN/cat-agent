@@ -150,7 +150,7 @@ func initBuiltinTools(db *gorm.DB) {
 	}
 }
 
-// initDefaultModelConfig 初始化默认全局模型配置（AI模型配置从环境变量迁移至数据库）
+// initDefaultModelConfig 初始化默认全局模型配置（所有模型提供者统一DB管理）
 func initDefaultModelConfig(db *gorm.DB) {
 	var count int64
 	db.Model(&domain.GlobalModelConfig{}).Count(&count)
@@ -162,6 +162,30 @@ func initDefaultModelConfig(db *gorm.DB) {
 				APIKey:       "",
 				DefaultModel: "gpt-4o-mini",
 				IsDefault:    true,
+				Enabled:      true,
+			},
+			{
+				Provider:     "deepseek",
+				BaseURL:      "https://api.deepseek.com/v1",
+				APIKey:       "",
+				DefaultModel: "deepseek-chat",
+				IsDefault:    false,
+				Enabled:      true,
+			},
+			{
+				Provider:     "openrouter",
+				BaseURL:      "https://openrouter.ai/api/v1",
+				APIKey:       "",
+				DefaultModel: "openai/gpt-4o-mini",
+				IsDefault:    false,
+				Enabled:      true,
+			},
+			{
+				Provider:     "modelscope",
+				BaseURL:      "https://api-inference.modelscope.cn/v1",
+				APIKey:       "",
+				DefaultModel: "Qwen/Qwen2.5-7B-Instruct",
+				IsDefault:    false,
 				Enabled:      true,
 			},
 			{

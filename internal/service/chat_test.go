@@ -6,87 +6,15 @@ import (
 	"eino-agent/internal/domain"
 )
 
-// mockModelConfigRepo implements repository.ModelConfigRepository for testing
-type mockModelConfigRepo struct {
-	configs map[string]*domain.GlobalModelConfig
-}
-
-func (m *mockModelConfigRepo) List() ([]domain.GlobalModelConfig, error) {
-	var list []domain.GlobalModelConfig
-	for _, v := range m.configs {
-		list = append(list, *v)
-	}
-	return list, nil
-}
-
-func (m *mockModelConfigRepo) GetByProvider(provider string) (*domain.GlobalModelConfig, error) {
-	if cfg, ok := m.configs[provider]; ok {
-		return cfg, nil
-	}
-	return nil, assertAnError("not found")
-}
-
-func (m *mockModelConfigRepo) GetDefault() (*domain.GlobalModelConfig, error) {
-	for _, v := range m.configs {
-		if v.IsDefault {
-			return v, nil
-		}
-	}
-	return nil, assertAnError("no default")
-}
-
-func (m *mockModelConfigRepo) Create(cfg *domain.GlobalModelConfig) error { return nil }
-func (m *mockModelConfigRepo) Update(cfg *domain.GlobalModelConfig) error { return nil }
-func (m *mockModelConfigRepo) Delete(id uint) error                       { return nil }
-
-// assertAnError returns a simple error (can't use errors.New in tests easily due to import)
-func assertAnError(msg string) error {
-	return &testError{msg: msg}
-}
-
-type testError struct{ msg string }
-
-func (e *testError) Error() string { return e.msg }
-
 func TestResolveModelConfig(t *testing.T) {
-	// 构建mock repo，模拟数据库中的模型配置
-	mock := &mockModelConfigRepo{
-		configs: map[string]*domain.GlobalModelConfig{
-			"openai": {
-				Provider:     "openai",
-				BaseURL:      "https://api.openai.com/v1",
-				APIKey:       "env-openai-key",
-				DefaultModel: "gpt-4o-mini",
-				IsDefault:    true,
-				Enabled:      true,
-			},
-			"local": {
-				Provider:     "local",
-				BaseURL:      "http://localhost:11434",
-				APIKey:       "",
-				DefaultModel: "qwen2.5",
-				IsDefault:    false,
-				Enabled:      true,
-			},
-		},
-	}
-
-	// 使用mock repo构建ChatService
-	// 直接设置repo的ModelConfig字段
+	// svc 的 repo 为 nil，getModelDefaults 会降级到硬编码默认值
 	svc := &ChatService{}
-
-	// 测试resolveModelConfig - 由于需要repo，我们测试getModelDefaults方法
-	t.Run("getModelDefaults openai", func(t *testing.T) {
-		// 注意：实际项目中应通过依赖注入使用mock
-		// 这里我们直接验证getModelDefaults的降级逻辑
-		_ = mock
-	})
 
 	tests := []struct {
 		name         string
 		agent        *domain.AgentConfig
 		input        *ChatInput
-		wantProvider string
+		wantProvider string // 返回的SDK提供者
 		wantBaseURL  string
 		wantAPIKey   string
 		wantModel    string
@@ -102,7 +30,7 @@ func TestResolveModelConfig(t *testing.T) {
 			wantModel:    "deepseek-chat",
 		},
 		{
-			name:         "openai uses db config (not env vars)",
+			name:         "openai unified with other providers",
 			agent:        &domain.AgentConfig{ModelProvider: "openai", ModelName: "gpt-4o-mini"},
 			input:        &ChatInput{},
 			wantProvider: "openai",
@@ -111,7 +39,7 @@ func TestResolveModelConfig(t *testing.T) {
 			wantModel:    "gpt-4o-mini",
 		},
 		{
-			name:         "openrouter defaults to openrouter base url",
+			name:         "openrouter maps to openai sdk",
 			agent:        &domain.AgentConfig{UseGlobalModelConfig: true},
 			input:        &ChatInput{VendorKey: "openrouter", ModelName: "openai/gpt-4o-mini"},
 			wantProvider: "openai",
@@ -120,7 +48,7 @@ func TestResolveModelConfig(t *testing.T) {
 			wantModel:    "openai/gpt-4o-mini",
 		},
 		{
-			name:         "modelscope uses openai compatible defaults",
+			name:         "modelscope maps to openai sdk",
 			agent:        &domain.AgentConfig{UseGlobalModelConfig: true},
 			input:        &ChatInput{VendorKey: "modelscope", ModelName: "Qwen/Qwen2.5-7B-Instruct"},
 			wantProvider: "openai",
@@ -150,13 +78,22 @@ func TestResolveModelConfig(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:         "ollama uses local base url when global fallback is enabled",
+			name:         "ollama maps to local sdk with unified defaults",
 			agent:        &domain.AgentConfig{UseGlobalModelConfig: true},
 			input:        &ChatInput{VendorKey: "ollama", ModelName: "qwen2.5"},
-			wantProvider: "ollama",
+			wantProvider: "local",
 			wantBaseURL:  "http://localhost:11434",
 			wantAPIKey:   "",
 			wantModel:    "qwen2.5",
+		},
+		{
+			name:         "local provider works same as ollama",
+			agent:        &domain.AgentConfig{UseGlobalModelConfig: true},
+			input:        &ChatInput{VendorKey: "local", ModelName: "llama3"},
+			wantProvider: "local",
+			wantBaseURL:  "http://localhost:11434",
+			wantAPIKey:   "",
+			wantModel:    "llama3",
 		},
 	}
 

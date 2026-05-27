@@ -87,21 +87,16 @@ func loadModelConfigs(repo *repository.Repository) []model.ProviderConfig {
 func newProviderFromDB(configs []model.ProviderConfig, providerName string) model.ModelProvider {
 	for _, c := range configs {
 		if c.Provider == providerName {
-			switch providerName {
-			case "openai":
-				return model.NewOpenAIProviderFromConfig(&c)
-			case "local":
+			// local/ollama 使用 Ollama API，其余统一使用 OpenAI 兼容协议
+			if providerName == "local" || providerName == "ollama" {
 				return model.NewLocalModelProviderFromConfig(&c)
-			default:
-				return model.NewOpenAIProviderFromConfig(&c)
 			}
+			return model.NewOpenAIProviderFromConfig(&c)
 		}
 	}
 	// 未找到，返回默认
-	switch providerName {
-	case "local":
+	if providerName == "local" || providerName == "ollama" {
 		return model.NewLocalModelProvider("http://localhost:11434")
-	default:
-		return model.NewOpenAIProvider("https://api.openai.com/v1", "")
 	}
+	return model.NewOpenAIProvider("https://api.openai.com/v1", "")
 }

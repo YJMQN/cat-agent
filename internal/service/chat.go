@@ -603,19 +603,29 @@ func (s *ChatService) parseToolIDs(toolIDsJSON string) []string {
 }
 
 // getModelDefaults 从数据库获取模型提供者的默认配置
+// 所有提供者统一走此方法，无特殊对待
 func (s *ChatService) getModelDefaults(provider string) (baseURL, apiKey, modelName string) {
-	cfg, err := s.repo.ModelConfig.GetByProvider(provider)
-	if err != nil {
-		switch provider {
-		case "openai":
-			return "https://api.openai.com/v1", "", "gpt-4o-mini"
-		case "local", "ollama":
-			return "http://localhost:11434", "", "qwen2.5"
-		default:
-			return "", "", ""
+	// 优先从数据库查询
+	if s.repo != nil && s.repo.ModelConfig != nil {
+		cfg, err := s.repo.ModelConfig.GetByProvider(provider)
+		if err == nil && cfg != nil {
+			return cfg.BaseURL, cfg.APIKey, cfg.DefaultModel
 		}
 	}
-	return cfg.BaseURL, cfg.APIKey, cfg.DefaultModel
+
+	// 数据库无配置时，使用硬编码降级默认值
+	defaults := map[string][3]string{
+		"openai":     {"https://api.openai.com/v1", "", "gpt-4o-mini"},
+		"deepseek":   {"https://api.deepseek.com/v1", "", "deepseek-chat"},
+		"openrouter": {"https://openrouter.ai/api/v1", "", "openai/gpt-4o-mini"},
+		"modelscope": {"https://api-inference.modelscope.cn/v1", "", "Qwen/Qwen2.5-7B-Instruct"},
+		"local":      {"http://localhost:11434", "", "qwen2.5"},
+		"ollama":     {"http://localhost:11434", "", "qwen2.5"},
+	}
+	if def, ok := defaults[provider]; ok {
+		return def[0], def[1], def[2]
+	}
+	return "", "", ""
 }
 
 // resolveModelConfig 解析请求覆盖后的模型配置
@@ -644,46 +654,8 @@ func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *Ch
 		return "", "", "", "", fmt.Errorf("模型提供者不能为空")
 	}
 
-	switch provider {
-	case "deepseek":
-		if baseURL == "" {
-			baseURL = "https://api.deepseek.com/v1"
-		}
-		if modelName == "" {
-			modelName = "deepseek-chat"
-		}
-		return provider, baseURL, apiKey, modelName, nil
-	case "openai":
-		if baseURL == "" || apiKey == "" {
-			defaultBase, defaultKey, _ := s.getModelDefaults("openai")
-			if baseURL == "" {
-				baseURL = defaultBase
-			}
-			if apiKey == "" {
-				apiKey = defaultKey
-			}
-		}
-		if modelName == "" {
-			modelName = "gpt-4o-mini"
-		}
-		return provider, baseURL, apiKey, modelName, nil
-	case "openrouter":
-		if baseURL == "" {
-			baseURL = "https://openrouter.ai/api/v1"
-		}
-		if modelName == "" {
-			modelName = "openai/gpt-4o-mini"
-		}
-		return "openai", baseURL, apiKey, modelName, nil
-	case "modelscope":
-		if baseURL == "" {
-			baseURL = "https://api-inference.modelscope.cn/v1"
-		}
-		if modelName == "" {
-			modelName = "Qwen/Qwen2.5-7B-Instruct"
-		}
-		return "openai", baseURL, apiKey, modelName, nil
-	case "custom":
+	// 所有模型提供者统一从数据库获取默认配置（除custom外）
+	if provider == "custom" {
 		if baseURL == "" {
 			return "", "", "", "", fmt.Errorf("自定义链接不能为空")
 		}
@@ -691,17 +663,32 @@ func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *Ch
 			return "", "", "", "", fmt.Errorf("模型名称不能为空")
 		}
 		return "openai", baseURL, apiKey, modelName, nil
-	case "local", "ollama":
+	}
+
+	// 统一从数据库获取默认配置
+	if baseURL == "" || apiKey == "" || modelName == "" {
+		defaultBase, defaultKey, defaultModel := s.getModelDefaults(provider)
 		if baseURL == "" {
-			baseURL, _, _ = s.getModelDefaults("local")
+			baseURL = defaultBase
+		}
+		if apiKey == "" {
+			apiKey = defaultKey
 		}
 		if modelName == "" {
-			modelName = "qwen2.5"
+			modelName = defaultModel
 		}
-		return provider, baseURL, apiKey, modelName, nil
-	default:
-		return "", "", "", "", fmt.Errorf("不支持的模型提供者: %s", provider)
 	}
+
+	// 映射到模型SDK类型：openrouter/modelscope/custom 使用 OpenAI 兼容协议
+	sdkProvider := provider
+	switch provider {
+	case "openrouter", "modelscope", "custom":
+		sdkProvider = "openai"
+	case "ollama":
+		sdkProvider = "local"
+	}
+
+	return sdkProvider, baseURL, apiKey, modelName, nil
 }
 
 // getModel 根据配置获取模型实例
