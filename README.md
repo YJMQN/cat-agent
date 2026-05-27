@@ -65,16 +65,15 @@ cat-agent/
 ```bash
 cd cat-agent
 
-# 设置环境变量 (可选)
-export OPENAI_KEY=sk-xxx          # OpenAI API Key
-export OPENAI_MODEL=gpt-4o-mini   # 默认模型
-
 # 编译运行
 go mod tidy
 go build -o server ./cmd/main.go
 ./server
 # 服务启动于 http://localhost:8080
 ```
+
+> **AI模型配置无需环境变量**：OpenAI Key、BaseURL、模型名称等均在数据库管理。
+> 首次启动后通过 API 配置（见下方「全局模型配置」）。
 
 ### 前端
 
@@ -100,9 +99,11 @@ npm run dev
 - 工具参数校验 & 执行超时控制
 - 多Agent协作编排 (工作流定义与执行)
 
-### 模型适配
-- **OpenAI兼容**: 支持 GPT-4o、GPT-4o-mini、DeepSeek、OpenRouter 等
+### 模型适配（全部通过数据库管理）
+- **OpenAI兼容**: 支持 GPT-4o、GPT-4o-mini、DeepSeek、OpenRouter、ModelScope 等
 - **本地模型**: 兼容 Ollama (qwen2.5、llama3 等)
+- **自定义**: 任意 OpenAI 兼容接口
+- 所有模型提供者的 BaseURL、API Key、默认模型均通过 `/api/v2/model-config` API 管理
 
 ### 内置工具
 - `weather` - 天气查询 (wttr.in)
@@ -138,11 +139,68 @@ npm run dev
 |------|--------|------|
 | `SERVER_PORT` | 8080 | 服务端口 |
 | `DATABASE_PATH` | ./data/cat-agent.db | SQLite路径 |
+| `DB_ENGINE` | sqlite | 数据库引擎 (sqlite / postgres) |
+| `DB_DSN` | (空) | PostgreSQL DSN (DB_ENGINE=postgres时使用) |
 | `JWT_SECRET` | (必须设置) | JWT密钥 |
+| `JWT_EXPIRE_HOURS` | 72 | JWT过期时间(小时) |
+| `APP_ENV` | development | 运行环境 |
 | `RATE_LIMIT_REQUESTS` | 100 | 速率限制 (每分钟请求数) |
+| `RATE_LIMIT_BURST` | 20 | 速率限制突发值 |
+| `AGENT_TIMEOUT` | 5m | Agent编排执行超时 |
 | `CRON_ENABLED` | true | 是否启用Cron调度器 |
-| `AGENT_TIMEOUT` | 5m | Agent编排超时时间 |
+| `SANDBOX_ENABLED` | false | 沙箱执行 |
 | `WS_PORT` | 8081 | WebSocket端口 |
+| `CONFIG_FILE` | (空) | YAML/TOML扩展配置路径 |
+| `DOCUMENT_DIR` | ./data/documents | 文档存储目录 |
+| `EXPORT_DIR` | ./data/exports | 导出文件目录 |
+| `TOKEN_ALERT_WEBHOOK` | (空) | Token超限告警Webhook |
 
-> **AI模型配置已迁移至数据库**：不再使用环境变量配置AI模型。
-> 通过 API `/api/v2/model-config` 管理 OpenAI / Ollama 等模型提供商的 BaseURL、API Key、默认模型等参数。
+> **AI模型配置已全部迁移至数据库管理**，不再使用环境变量。
+> 启动后通过 `/api/v2/model-config` 接口配置，见下方说明。
+
+## 全局模型配置
+
+所有AI模型提供者（OpenAI、DeepSeek、OpenRouter、ModelScope、Ollama等）的配置均存储在数据库 `global_model_configs` 表中，提供统一管理API。
+
+### 默认配置（首次启动自动创建）
+
+| 提供者 | BaseURL | 默认模型 |
+|--------|---------|---------|
+| `openai` | https://api.openai.com/v1 | gpt-4o-mini |
+| `deepseek` | https://api.deepseek.com/v1 | deepseek-chat |
+| `openrouter` | https://openrouter.ai/api/v1 | openai/gpt-4o-mini |
+| `modelscope` | https://api-inference.modelscope.cn/v1 | Qwen/Qwen2.5-7B-Instruct |
+| `local` | http://localhost:11434 | qwen2.5 |
+
+### API 接口
+
+所有接口需 `JWT` 认证，挂载于 `/api/v2` 路由下。
+
+```bash
+# 列出所有模型配置
+GET    /api/v2/model-config
+
+# 新增模型提供者
+POST   /api/v2/model-config
+# Body: {"provider":"openai","base_url":"...","api_key":"...","default_model":"...","enabled":true}
+
+# 查询单个提供者配置
+GET    /api/v2/model-config/:provider
+
+# 更新提供者配置（修改API Key、BaseURL等）
+PUT    /api/v2/model-config/:provider
+# Body: {"base_url":"...","api_key":"...","default_model":"..."}
+
+# 删除提供者配置
+DELETE /api/v2/model-config/:provider
+```
+
+### 快速设置 OpenAI API Key
+
+```bash
+# 将 YOUR_API_KEY 替换为实际的 Key
+curl -X PUT http://localhost:8080/api/v2/model-config/openai \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"api_key":"sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'
+```
