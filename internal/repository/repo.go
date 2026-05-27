@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"eino-agent/internal/domain"
+	"cat-agent/internal/domain"
 	"time"
 
 	"gorm.io/gorm"
@@ -127,6 +127,7 @@ type MemoryRepository interface {
 	Create(mem *domain.Memory) error
 	GetByID(id uint) (*domain.Memory, error)
 	GetByUser(userID uint) ([]domain.Memory, error)
+	GetAll() ([]domain.Memory, error)
 	GetByUserAndCategory(userID, category string) ([]domain.Memory, error)
 	Update(mem *domain.Memory) error
 	Delete(id uint) error
@@ -310,6 +311,11 @@ func (r *memoryRepo) GetByID(id uint) (*domain.Memory, error) { var m domain.Mem
 func (r *memoryRepo) GetByUser(userID uint) ([]domain.Memory, error) {
 	var mems []domain.Memory
 	err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&mems).Error
+	return mems, err
+}
+func (r *memoryRepo) GetAll() ([]domain.Memory, error) {
+	var mems []domain.Memory
+	err := r.db.Order("created_at DESC").Find(&mems).Error
 	return mems, err
 }
 func (r *memoryRepo) GetByUserAndCategory(userID, category string) ([]domain.Memory, error) {

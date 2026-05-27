@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"eino-agent/internal/repository"
-	"eino-agent/internal/service"
+	"cat-agent/internal/repository"
+	"cat-agent/internal/service"
 )
 
 // Handlers 所有HTTP处理器集合

@@ -1,10 +1,10 @@
 package service
 
 import (
-	"eino-agent/internal/config"
-	"eino-agent/internal/model"
-	"eino-agent/internal/repository"
-	"eino-agent/internal/tool"
+	"cat-agent/internal/config"
+	"cat-agent/internal/model"
+	"cat-agent/internal/repository"
+	"cat-agent/internal/tool"
 )
 
 // Services 服务层集合

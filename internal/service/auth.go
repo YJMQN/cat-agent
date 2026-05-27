@@ -4,9 +4,9 @@ import (
 	"errors"
 	"time"
 
-	"eino-agent/internal/config"
-	"eino-agent/internal/domain"
-	"eino-agent/internal/repository"
+	"cat-agent/internal/config"
+	"cat-agent/internal/domain"
+	"cat-agent/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"

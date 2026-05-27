@@ -77,7 +77,11 @@ func trimOutput(content string, maxSize int) string {
 	if len(content) <= maxSize {
 		return content
 	}
-	return content[:maxSize] + fmt.Sprintf("\n... (输出已截断，总大小 %d 字节)", len(content))
+	suffix := fmt.Sprintf("\n... (输出已截断，总大小 %d 字节)", len(content))
+	if maxSize <= len(suffix) {
+		return suffix[:maxSize]
+	}
+	return content[:maxSize-len(suffix)] + suffix
 }
 
 // estimateTokens 估算Token数量（简单估算：约4字符=1token）
@@ -1102,16 +1106,18 @@ func (t *FileTool) Execute(ctx context.Context, args map[string]interface{}) (*R
 
 // isSensitivePath 检查是否为敏感路径
 func isSensitivePath(path string) bool {
-	sensitivePatterns := []string{
-		"/etc/passwd", "/etc/shadow", "/etc/sudoers",
-		"/root/.ssh", "/home/*/.ssh",
-		".env", "*.pem", "*.key", "*.secret",
-	}
 	absPath := filepath.Clean(path)
-	for _, pattern := range sensitivePatterns {
-		if strings.Contains(absPath, pattern) {
-			return true
-		}
+	if absPath == ".env" || filepath.Base(absPath) == ".env" {
+		return true
+	}
+	if strings.Contains(absPath, "/etc/passwd") || strings.Contains(absPath, "/etc/shadow") || strings.Contains(absPath, "/etc/sudoers") {
+		return true
+	}
+	if strings.Contains(absPath, "/root/.ssh") || strings.Contains(absPath, "/.ssh") {
+		return true
+	}
+	if strings.HasSuffix(absPath, ".pem") || strings.HasSuffix(absPath, ".key") || strings.HasSuffix(absPath, ".secret") {
+		return true
 	}
 	return false
 }

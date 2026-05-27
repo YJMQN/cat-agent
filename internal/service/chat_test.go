@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"eino-agent/internal/domain"
+	"cat-agent/internal/domain"
 )
 
 func TestResolveModelConfig(t *testing.T) {

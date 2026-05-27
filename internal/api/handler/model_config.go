@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"eino-agent/internal/domain"
-	"eino-agent/internal/repository"
+	"cat-agent/internal/domain"
+	"cat-agent/internal/repository"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

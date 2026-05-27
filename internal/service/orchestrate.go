@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"eino-agent/internal/config"
-	"eino-agent/internal/domain"
-	"eino-agent/internal/repository"
+	"cat-agent/internal/config"
+	"cat-agent/internal/domain"
+	"cat-agent/internal/repository"
 
 	"github.com/google/uuid"
 )

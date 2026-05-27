@@ -3,8 +3,8 @@ package service
 import (
 	"testing"
 
-	"eino-agent/internal/domain"
-	"eino-agent/internal/repository"
+	"cat-agent/internal/domain"
+	"cat-agent/internal/repository"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

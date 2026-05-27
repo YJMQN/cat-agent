@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"eino-agent/internal/api/handler"
-	"eino-agent/internal/api/middleware"
-	"eino-agent/internal/config"
-	"eino-agent/internal/repository"
-	"eino-agent/internal/service"
+	"cat-agent/internal/api/handler"
+	"cat-agent/internal/api/middleware"
+	"cat-agent/internal/config"
+	"cat-agent/internal/repository"
+	"cat-agent/internal/service"
 
 	"github.com/gin-gonic/gin"
 )

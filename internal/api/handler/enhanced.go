@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"eino-agent/internal/domain"
-	"eino-agent/internal/service"
+	"cat-agent/internal/domain"
+	"cat-agent/internal/service"
 
 	"github.com/gin-gonic/gin"
 )

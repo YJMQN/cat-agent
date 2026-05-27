@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"eino-agent/internal/service"
+	"cat-agent/internal/service"
 
 	"github.com/gin-gonic/gin"
 )

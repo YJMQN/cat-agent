@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"eino-agent/internal/domain"
-	"eino-agent/internal/repository"
+	"cat-agent/internal/domain"
+	"cat-agent/internal/repository"
 )
 
 // AdminService 管理服务
@@ -275,8 +275,7 @@ func (s *AdminService) ListMemories(userID uint) ([]domain.Memory, error) {
 	if userID > 0 {
 		return s.repo.Memory.GetByUser(userID)
 	}
-	// 返回所有记忆 (简化实现)
-	return []domain.Memory{}, nil
+	return s.repo.Memory.GetAll()
 }
 
 func (s *AdminService) GetMemory(id uint) (*domain.Memory, error) {

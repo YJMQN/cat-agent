@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"eino-agent/internal/domain"
+	"cat-agent/internal/domain"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
