@@ -139,12 +139,10 @@ npm run dev
 | `SERVER_PORT` | 8080 | 服务端口 |
 | `DATABASE_PATH` | ./data/cat-agent.db | SQLite路径 |
 | `JWT_SECRET` | (必须设置) | JWT密钥 |
-| `OPENAI_BASE` | https://api.openai.com/v1 | OpenAI端点 |
-| `OPENAI_KEY` | (空) | API Key |
-| `OPENAI_MODEL` | gpt-4o-mini | 默认模型 |
-| `LOCAL_MODEL_URL` | http://localhost:11434 | Ollama端点 |
-| `LOCAL_MODEL` | qwen2.5 | 本地模型名 |
 | `RATE_LIMIT_REQUESTS` | 100 | 速率限制 (每分钟请求数) |
 | `CRON_ENABLED` | true | 是否启用Cron调度器 |
-| `DB_ENGINE` | sqlite | 数据库引擎 (sqlite/postgres) |
+| `AGENT_TIMEOUT` | 5m | Agent编排超时时间 |
 | `WS_PORT` | 8081 | WebSocket端口 |
+
+> **AI模型配置已迁移至数据库**：不再使用环境变量配置AI模型。
+> 通过 API `/api/v2/model-config` 管理 OpenAI / Ollama 等模型提供商的 BaseURL、API Key、默认模型等参数。

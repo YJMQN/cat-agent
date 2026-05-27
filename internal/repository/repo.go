@@ -27,6 +27,7 @@ type Repository struct {
 	DocumentChunk DocumentChunkRepository
 	ExportRecord  ExportRecordRepository
 	TokenBudget   TokenBudgetRepository
+	ModelConfig   GlobalModelConfigRepository
 	
 	// 多Agent协作编排仓储
 	Workflow         WorkflowRepository
@@ -56,6 +57,7 @@ func New(db *gorm.DB) *Repository {
 		DocumentChunk: &documentChunkRepo{db: db},
 		ExportRecord:  &exportRecordRepo{db: db},
 		TokenBudget:   &tokenBudgetRepo{db: db},
+		ModelConfig:    &modelConfigRepo{db: db},
 
 		Workflow:          &workflowRepo{db: db},
 		WorkflowExecution: &workflowExecutionRepo{db: db},
@@ -207,6 +209,16 @@ type TokenBudgetRepository interface {
 	Create(b *domain.TokenBudget) error
 	GetByUser(userID uint) (*domain.TokenBudget, error)
 	Update(b *domain.TokenBudget) error
+}
+
+// GlobalModelConfigRepository 全局模型配置仓储
+type GlobalModelConfigRepository interface {
+	List() ([]domain.GlobalModelConfig, error)
+	GetByProvider(provider string) (*domain.GlobalModelConfig, error)
+	GetDefault() (*domain.GlobalModelConfig, error)
+	Create(cfg *domain.GlobalModelConfig) error
+	Update(cfg *domain.GlobalModelConfig) error
+	Delete(id uint) error
 }
 
 // ========== 多Agent协作编排仓储接口 ==========
@@ -402,6 +414,28 @@ type tokenBudgetRepo struct{ db *gorm.DB }
 func (r *tokenBudgetRepo) Create(b *domain.TokenBudget) error { return r.db.Create(b).Error }
 func (r *tokenBudgetRepo) GetByUser(userID uint) (*domain.TokenBudget, error) { var b domain.TokenBudget; err := r.db.Where("user_id = ?", userID).First(&b).Error; return &b, err }
 func (r *tokenBudgetRepo) Update(b *domain.TokenBudget) error { return r.db.Save(b).Error }
+
+// ========== GlobalModelConfig Repo ==========
+
+type modelConfigRepo struct{ db *gorm.DB }
+func (r *modelConfigRepo) List() ([]domain.GlobalModelConfig, error) {
+	var cfgs []domain.GlobalModelConfig
+	err := r.db.Find(&cfgs).Error
+	return cfgs, err
+}
+func (r *modelConfigRepo) GetByProvider(provider string) (*domain.GlobalModelConfig, error) {
+	var cfg domain.GlobalModelConfig
+	err := r.db.Where("provider = ?", provider).First(&cfg).Error
+	return &cfg, err
+}
+func (r *modelConfigRepo) GetDefault() (*domain.GlobalModelConfig, error) {
+	var cfg domain.GlobalModelConfig
+	err := r.db.Where("is_default = ?", true).First(&cfg).Error
+	return &cfg, err
+}
+func (r *modelConfigRepo) Create(cfg *domain.GlobalModelConfig) error { return r.db.Create(cfg).Error }
+func (r *modelConfigRepo) Update(cfg *domain.GlobalModelConfig) error { return r.db.Save(cfg).Error }
+func (r *modelConfigRepo) Delete(id uint) error { return r.db.Delete(&domain.GlobalModelConfig{}, id).Error }
 
 // ========== 多Agent协作编排实现 ==========
 

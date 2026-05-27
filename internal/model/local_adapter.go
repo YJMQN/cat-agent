@@ -25,6 +25,17 @@ func NewLocalModelProvider(baseURL string) *LocalModelProvider {
 	}
 }
 
+// NewLocalModelProviderFromConfig 从数据库配置创建本地模型提供者
+func NewLocalModelProviderFromConfig(cfg *ProviderConfig) *LocalModelProvider {
+	if cfg == nil {
+		return NewLocalModelProvider("http://localhost:11434")
+	}
+	return &LocalModelProvider{
+		BaseURL: cfg.BaseURL,
+		Client:  DefaultHTTPClient(),
+	}
+}
+
 // NewLocalModelProviderWithClient 使用自定义HTTP客户端创建
 func NewLocalModelProviderWithClient(baseURL string, client *http.Client) *LocalModelProvider {
 	return &LocalModelProvider{

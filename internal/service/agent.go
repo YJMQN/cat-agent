@@ -14,16 +14,16 @@ import (
 // AgentService Agent管理服务
 type AgentService struct {
 	repo           *repository.Repository
-	openaiProvider *model.OpenAIProvider
-	localProvider  *model.LocalModelProvider
+	openaiProvider model.ModelProvider
+	localProvider  model.ModelProvider
 	toolRegistry   *tool.Registry
 }
 
 // NewAgentService 创建Agent服务
 func NewAgentService(
 	repo *repository.Repository,
-	openaiProvider *model.OpenAIProvider,
-	localProvider *model.LocalModelProvider,
+	openaiProvider model.ModelProvider,
+	localProvider model.ModelProvider,
 	toolRegistry *tool.Registry,
 ) *AgentService {
 	return &AgentService{

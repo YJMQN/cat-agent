@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"eino-agent/internal/repository"
 	"eino-agent/internal/service"
 )
 
@@ -21,10 +22,13 @@ type Handlers struct {
 	Export *ExportHandler
 	RAG    *RAGHandler
 	Budget *TokenBudgetHandler
+
+	// 模型配置（替代环境变量）
+	ModelConfig *ModelConfigHandler
 }
 
 // NewHandlers 创建所有处理器
-func NewHandlers(svc *service.Services) *Handlers {
+func NewHandlers(svc *service.Services, repo *repository.Repository) *Handlers {
 	return &Handlers{
 		Auth:        NewAuthHandler(svc.Auth),
 		Chat:        NewChatHandler(svc.Chat),
@@ -41,5 +45,8 @@ func NewHandlers(svc *service.Services) *Handlers {
 		Export: NewExportHandler(svc.Export),
 		RAG:    NewRAGHandler(svc.RAG),
 		Budget: NewTokenBudgetHandler(svc.TokenBudget),
+
+		// 模型配置
+		ModelConfig: NewModelConfigHandler(repo),
 	}
 }

@@ -27,8 +27,8 @@ type FunctionCall struct {
 
 // ToolDef 工具定义 (传给模型)
 type ToolDef struct {
-	Type     string           `json:"type"`
-	Function ToolDefFunction  `json:"function"`
+	Type     string          `json:"type"`
+	Function ToolDefFunction `json:"function"`
 }
 
 // ToolDefFunction 工具函数定义
@@ -77,4 +77,12 @@ type Model interface {
 type ModelProvider interface {
 	Create(modelName string) (Model, error)
 	ProviderName() string
+}
+
+// ProviderConfig 提供者配置（从数据库加载）
+type ProviderConfig struct {
+	Provider   string `json:"provider"`    // openai, local
+	BaseURL    string `json:"base_url"`
+	APIKey     string `json:"api_key,omitempty"`
+	DefaultModel string `json:"default_model"`
 }

@@ -51,6 +51,8 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		&domain.DocumentChunk{},
 		&domain.ExportRecord{},
 		&domain.TokenBudget{},
+		// 全局模型配置
+		&domain.GlobalModelConfig{},
 	); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
@@ -62,6 +64,9 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 
 	// 注册内置工具
 	initBuiltinTools(db)
+
+	// 初始化默认模型配置
+	initDefaultModelConfig(db)
 
 	return db, nil
 }
@@ -141,6 +146,35 @@ func initBuiltinTools(db *gorm.DB) {
 		}
 		for _, t := range tools {
 			db.Create(&t)
+		}
+	}
+}
+
+// initDefaultModelConfig 初始化默认全局模型配置（AI模型配置从环境变量迁移至数据库）
+func initDefaultModelConfig(db *gorm.DB) {
+	var count int64
+	db.Model(&domain.GlobalModelConfig{}).Count(&count)
+	if count == 0 {
+		defaults := []domain.GlobalModelConfig{
+			{
+				Provider:     "openai",
+				BaseURL:      "https://api.openai.com/v1",
+				APIKey:       "",
+				DefaultModel: "gpt-4o-mini",
+				IsDefault:    true,
+				Enabled:      true,
+			},
+			{
+				Provider:     "local",
+				BaseURL:      "http://localhost:11434",
+				APIKey:       "",
+				DefaultModel: "qwen2.5",
+				IsDefault:    false,
+				Enabled:      true,
+			},
+		}
+		for _, c := range defaults {
+			db.Create(&c)
 		}
 	}
 }

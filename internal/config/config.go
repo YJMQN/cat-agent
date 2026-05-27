@@ -10,84 +10,55 @@ import (
 
 // Config 应用配置
 type Config struct {
-	Env           string
-	ServerPort    int
-	DatabasePath  string
-	JWTSecret     string
-	JWTExpire     int
-	OpenAIBase    string
-	OpenAIKey     string
-	OpenAIModel   string
-	LocalModelURL string
-	LocalModel    string
+	Env          string
+	ServerPort   int
+	DatabasePath string
+	DBEngine     string
+	DBDSN        string
+	JWTSecret    string
+	JWTExpire    int
 
 	// 第一阶段: 速率限制
 	RateLimitRequests int
 	RateLimitBurst    int
 
-	// 第二阶段: HTTP客户端
-	HTTPTimeout       time.Duration
-	HTTPMaxRetries    int
-	HTTPRetryDelay    time.Duration
-	MaxConcurrentAgents int
-	AgentTimeout      time.Duration
+	// 通用超时配置
+	AgentTimeout time.Duration
 
 	// 第三阶段: 智能能力增强
-	MemoryEmbeddingModel string // 记忆嵌入模型
-	CronEnabled          bool   // Cron调度器启用
-	SandboxEnabled       bool   // 沙箱启用
-	WSUrl                string // WebSocket监听地址
-	WSPort               int    // WebSocket端口
-
-	// 第四阶段: 体验优化
-	ConfigFile         string // YAML/TOML配置文件路径
-	DocumentDir        string // 文档存储目录
-	ExportDir          string // 导出文件目录
-	DBEngine           string // 数据库引擎: sqlite, postgres
-	DBDSN              string // 数据库DSN
-
-	// 费用相关
-	TokenAlertWebhook string // Token告警Webhook
+	ConfigFile         string
+	DocumentDir        string
+	ExportDir          string
+	CronEnabled        bool
+	SandboxEnabled     bool
+	WSPort             int
+	TokenAlertWebhook  string
 }
 
-const defaultJWTSecret = "eino-agent-jwt-secret-2024"
+const defaultJWTSecret = "cat-agent-jwt-secret-2024"
 
-// Load 从环境变量加载配置
+// Load 从环境变量加载配置（AI模型配置已移至数据库）
 func Load() (*Config, error) {
 	cfg := &Config{
-		Env:           getEnv("APP_ENV", "development"),
-		ServerPort:    getEnvInt("SERVER_PORT", 8080),
-		DatabasePath:  getEnv("DATABASE_PATH", "./data/eino.db"),
-		JWTSecret:     getEnv("JWT_SECRET", ""),
-		JWTExpire:     getEnvInt("JWT_EXPIRE_HOURS", 72),
-		OpenAIBase:    getEnv("OPENAI_BASE", "https://api.openai.com/v1"),
-		OpenAIKey:     getEnv("OPENAI_KEY", ""),
-		OpenAIModel:   getEnv("OPENAI_MODEL", "gpt-4o-mini"),
-		LocalModelURL: getEnv("LOCAL_MODEL_URL", "http://localhost:11434"),
-		LocalModel:    getEnv("LOCAL_MODEL", "qwen2.5"),
+		Env:          getEnv("APP_ENV", "development"),
+		ServerPort:   getEnvInt("SERVER_PORT", 8080),
+		DatabasePath: getEnv("DATABASE_PATH", "./data/cat-agent.db"),
+		DBEngine:     getEnv("DB_ENGINE", "sqlite"),
+		DBDSN:        getEnv("DB_DSN", ""),
+		JWTSecret:    getEnv("JWT_SECRET", ""),
+		JWTExpire:    getEnvInt("JWT_EXPIRE_HOURS", 72),
 
 		RateLimitRequests: getEnvInt("RATE_LIMIT_REQUESTS", 100),
 		RateLimitBurst:    getEnvInt("RATE_LIMIT_BURST", 20),
 
-		HTTPTimeout:       getEnvDuration("HTTP_TIMEOUT", 30*time.Second),
-		HTTPMaxRetries:    getEnvInt("HTTP_MAX_RETRIES", 3),
-		HTTPRetryDelay:    getEnvDuration("HTTP_RETRY_DELAY", 1*time.Second),
-		MaxConcurrentAgents: getEnvInt("MAX_CONCURRENT_AGENTS", 10),
 		AgentTimeout:      getEnvDuration("AGENT_TIMEOUT", 5*time.Minute),
 
-		// 第三阶段
-		MemoryEmbeddingModel: getEnv("MEMORY_EMBEDDING_MODEL", "local"),
-		CronEnabled:          getEnvBool("CRON_ENABLED", true),
-		SandboxEnabled:       getEnvBool("SANDBOX_ENABLED", false),
-		WSUrl:                getEnv("WS_URL", "127.0.0.1"),
-		WSPort:               getEnvInt("WS_PORT", 8081),
-
-		// 第四阶段
-		ConfigFile:         getEnv("CONFIG_FILE", ""),
-		DocumentDir:        getEnv("DOCUMENT_DIR", "./data/documents"),
-		ExportDir:          getEnv("EXPORT_DIR", "./data/exports"),
-		DBEngine:           getEnv("DB_ENGINE", "sqlite"),
-		DBDSN:              getEnv("DB_DSN", ""),
+		ConfigFile:        getEnv("CONFIG_FILE", ""),
+		DocumentDir:       getEnv("DOCUMENT_DIR", "./data/documents"),
+		ExportDir:         getEnv("EXPORT_DIR", "./data/exports"),
+		CronEnabled:       getEnvBool("CRON_ENABLED", true),
+		SandboxEnabled:    getEnvBool("SANDBOX_ENABLED", false),
+		WSPort:            getEnvInt("WS_PORT", 8081),
 		TokenAlertWebhook: getEnv("TOKEN_ALERT_WEBHOOK", ""),
 	}
 

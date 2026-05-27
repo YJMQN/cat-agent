@@ -83,8 +83,6 @@ func TestToolConfirmationManagerTTL(t *testing.T) {
 }
 
 func TestLocalCommandToolDangerousOperators(t *testing.T) {
-	tool := &LocalCommandTool{}
-
 	dangerousCommands := []string{
 		"ls; rm -rf /",
 		"cat /etc/passwd | grep root",

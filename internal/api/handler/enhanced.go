@@ -297,4 +297,14 @@ func RegisterEnhancedRoutes(r *gin.RouterGroup, handlers *Handlers) {
 	{
 		budget.GET("/status", handlers.Budget.GetBudget)
 	}
+
+	// 全局模型配置管理（替代环境变量配置）
+	mcfg := r.Group("/model-config")
+	{
+		mcfg.GET("", handlers.ModelConfig.List)
+		mcfg.POST("", handlers.ModelConfig.Create)
+		mcfg.GET("/:provider", handlers.ModelConfig.GetByProvider)
+		mcfg.PUT("/:provider", handlers.ModelConfig.Update)
+		mcfg.DELETE("/:provider", handlers.ModelConfig.Delete)
+	}
 }

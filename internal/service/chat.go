@@ -20,8 +20,8 @@ import (
 // ChatService 对话服务 - Agent核心循环
 type ChatService struct {
 	repo              *repository.Repository
-	openaiProvider    *model.OpenAIProvider
-	localProvider     *model.LocalModelProvider
+	openaiProvider    model.ModelProvider
+	localProvider     model.ModelProvider
 	toolRegistry      *tool.Registry
 	cfg               *config.Config
 	pendingApprovals  map[string]*PendingToolApproval
@@ -40,8 +40,8 @@ type PendingToolApproval struct {
 // NewChatService 创建对话服务
 func NewChatService(
 	repo *repository.Repository,
-	openaiProvider *model.OpenAIProvider,
-	localProvider *model.LocalModelProvider,
+	openaiProvider model.ModelProvider,
+	localProvider model.ModelProvider,
 	toolRegistry *tool.Registry,
 	cfg *config.Config,
 ) *ChatService {
@@ -602,6 +602,22 @@ func (s *ChatService) parseToolIDs(toolIDsJSON string) []string {
 	return ids
 }
 
+// getModelDefaults 从数据库获取模型提供者的默认配置
+func (s *ChatService) getModelDefaults(provider string) (baseURL, apiKey, modelName string) {
+	cfg, err := s.repo.ModelConfig.GetByProvider(provider)
+	if err != nil {
+		switch provider {
+		case "openai":
+			return "https://api.openai.com/v1", "", "gpt-4o-mini"
+		case "local", "ollama":
+			return "http://localhost:11434", "", "qwen2.5"
+		default:
+			return "", "", ""
+		}
+	}
+	return cfg.BaseURL, cfg.APIKey, cfg.DefaultModel
+}
+
 // resolveModelConfig 解析请求覆盖后的模型配置
 func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *ChatInput) (provider string, baseURL string, apiKey string, modelName string, err error) {
 	if agentCfg == nil {
@@ -638,11 +654,14 @@ func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *Ch
 		}
 		return provider, baseURL, apiKey, modelName, nil
 	case "openai":
-		if baseURL == "" {
-			baseURL = s.cfg.OpenAIBase
-		}
-		if apiKey == "" {
-			apiKey = s.cfg.OpenAIKey
+		if baseURL == "" || apiKey == "" {
+			defaultBase, defaultKey, _ := s.getModelDefaults("openai")
+			if baseURL == "" {
+				baseURL = defaultBase
+			}
+			if apiKey == "" {
+				apiKey = defaultKey
+			}
 		}
 		if modelName == "" {
 			modelName = "gpt-4o-mini"
@@ -674,7 +693,7 @@ func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *Ch
 		return "openai", baseURL, apiKey, modelName, nil
 	case "local", "ollama":
 		if baseURL == "" {
-			baseURL = s.cfg.LocalModelURL
+			baseURL, _, _ = s.getModelDefaults("local")
 		}
 		if modelName == "" {
 			modelName = "qwen2.5"

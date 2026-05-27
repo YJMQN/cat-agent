@@ -39,7 +39,7 @@ func main() {
 	svc := service.NewServices(repo, cfg)
 
 	// 初始化处理器
-	h := handler.NewHandlers(svc)
+	h := handler.NewHandlers(svc, repo)
 
 	// 第三阶段：启动Cron调度器
 	if cfg.CronEnabled {

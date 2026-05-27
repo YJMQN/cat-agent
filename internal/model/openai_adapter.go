@@ -28,6 +28,18 @@ func NewOpenAIProvider(baseURL, apiKey string) *OpenAIProvider {
 	}
 }
 
+// NewOpenAIProviderFromConfig 从数据库配置创建OpenAI提供者
+func NewOpenAIProviderFromConfig(cfg *ProviderConfig) *OpenAIProvider {
+	if cfg == nil {
+		return NewOpenAIProvider("https://api.openai.com/v1", "")
+	}
+	return &OpenAIProvider{
+		BaseURL: cfg.BaseURL,
+		APIKey:  cfg.APIKey,
+		Client:  DefaultHTTPClient(),
+	}
+}
+
 // NewOpenAIProviderWithClient 使用自定义HTTP客户端创建
 func NewOpenAIProviderWithClient(baseURL, apiKey string, client *http.Client) *OpenAIProvider {
 	return &OpenAIProvider{

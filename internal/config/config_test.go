@@ -112,11 +112,9 @@ func TestConfigDefaults(t *testing.T) {
 
 	// 检查默认值
 	expectedDefaults := map[string]interface{}{
-		"ServerPort":         8080,
-		"RateLimitRequests":  100,
-		"RateLimitBurst":     20,
-		"HTTPMaxRetries":     3,
-		"MaxConcurrentAgents": 10,
+		"ServerPort":        8080,
+		"RateLimitRequests": 100,
+		"RateLimitBurst":    20,
 	}
 
 	for key, expected := range expectedDefaults {
@@ -132,14 +130,6 @@ func TestConfigDefaults(t *testing.T) {
 		case "RateLimitBurst":
 			if cfg.RateLimitBurst != expected.(int) {
 				t.Errorf("%s 默认值不匹配: got %d, want %d", key, cfg.RateLimitBurst, expected)
-			}
-		case "HTTPMaxRetries":
-			if cfg.HTTPMaxRetries != expected.(int) {
-				t.Errorf("%s 默认值不匹配: got %d, want %d", key, cfg.HTTPMaxRetries, expected)
-			}
-		case "MaxConcurrentAgents":
-			if cfg.MaxConcurrentAgents != expected.(int) {
-				t.Errorf("%s 默认值不匹配: got %d, want %d", key, cfg.MaxConcurrentAgents, expected)
 			}
 		}
 	}

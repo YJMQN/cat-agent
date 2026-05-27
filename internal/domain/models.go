@@ -145,6 +145,19 @@ type User struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// GlobalModelConfig 全局模型配置（替代环境变量）
+type GlobalModelConfig struct {
+	ID            uint      `json:"id" gorm:"primaryKey"`
+	Provider      string    `json:"provider" gorm:"uniqueIndex;size:32;not null"` // openai, local
+	BaseURL       string    `json:"base_url" gorm:"size:256"`
+	APIKey        string    `json:"api_key" gorm:"size:512"`
+	DefaultModel  string    `json:"default_model" gorm:"size:128"`
+	IsDefault     bool      `json:"is_default" gorm:"default:false"` // 是否默认提供商
+	Enabled       bool      `json:"enabled" gorm:"default:true"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 // AgentConfig Agent配置
 type AgentConfig struct {
 	ID                   uint      `json:"id" gorm:"primaryKey"`
