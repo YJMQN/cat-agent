@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,11 +21,11 @@ import (
 
 // OrchestrateService 工作流编排服务
 type OrchestrateService struct {
-	repo              *repository.Repository
-	chatService       *ChatService
-	cfg               *config.Config
-	activeExecutions  map[uint]context.CancelFunc // 活跃执行及其取消函数
-	executionsMu      sync.RWMutex
+	repo             *repository.Repository
+	chatService      *ChatService
+	cfg              *config.Config
+	activeExecutions map[uint]context.CancelFunc // 活跃执行及其取消函数
+	executionsMu     sync.RWMutex
 }
 
 // NewOrchestrateService 创建编排服务
@@ -42,22 +44,22 @@ func NewOrchestrateService(
 
 // WorkflowInput 创建工作流输入
 type WorkflowInput struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
 	Steps       []domain.WorkflowStep `json:"steps"`
-	InputSchema string            `json:"input_schema"`
-	UserID      uint              `json:"user_id"`
+	InputSchema string                `json:"input_schema"`
+	UserID      uint                  `json:"user_id"`
 }
 
 // WorkflowOutput 工作流输出
 type WorkflowOutput struct {
-	ID          uint              `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
+	ID          uint                  `json:"id"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
 	Steps       []domain.WorkflowStep `json:"steps"`
-	InputSchema string            `json:"input_schema"`
-	Status      string            `json:"status"`
-	CreatedAt   time.Time         `json:"created_at"`
+	InputSchema string                `json:"input_schema"`
+	Status      string                `json:"status"`
+	CreatedAt   time.Time             `json:"created_at"`
 }
 
 // CreateWorkflow 创建工作流
@@ -183,33 +185,33 @@ func (s *OrchestrateService) DeleteWorkflow(ctx context.Context, workflowID uint
 
 // ExecutionInput 执行输入
 type ExecutionInput struct {
-	WorkflowID uint                    `json:"workflow_id"`
-	UserID     uint                    `json:"user_id"`
-	Input      map[string]interface{}  `json:"input"`
+	WorkflowID uint                   `json:"workflow_id"`
+	UserID     uint                   `json:"user_id"`
+	Input      map[string]interface{} `json:"input"`
 }
 
 // ExecutionOutput 执行输出
 type ExecutionOutput struct {
-	ID           uint                    `json:"id"`
-	UUID         string                  `json:"uuid"`
-	WorkflowID   uint                    `json:"workflow_id"`
-	Status       string                  `json:"status"`
-	Input        map[string]interface{}  `json:"input"`
-	Output       map[string]interface{}  `json:"output,omitempty"`
-	StepResults  []StepResultOutput      `json:"step_results,omitempty"`
-	StartedAt    time.Time               `json:"started_at"`
-	CompletedAt  time.Time               `json:"completed_at,omitempty"`
-	Duration     int                     `json:"duration"`
+	ID          uint                   `json:"id"`
+	UUID        string                 `json:"uuid"`
+	WorkflowID  uint                   `json:"workflow_id"`
+	Status      string                 `json:"status"`
+	Input       map[string]interface{} `json:"input"`
+	Output      map[string]interface{} `json:"output,omitempty"`
+	StepResults []StepResultOutput     `json:"step_results,omitempty"`
+	StartedAt   time.Time              `json:"started_at"`
+	CompletedAt time.Time              `json:"completed_at,omitempty"`
+	Duration    int                    `json:"duration"`
 }
 
 // StepResultOutput 步骤结果输出
 type StepResultOutput struct {
-	StepID     string                  `json:"step_id"`
-	AgentID    uint                    `json:"agent_id"`
-	Status     string                  `json:"status"`
-	Output     map[string]interface{}  `json:"output,omitempty"`
-	Error      string                  `json:"error,omitempty"`
-	Duration   int                     `json:"duration"`
+	StepID   string                 `json:"step_id"`
+	AgentID  uint                   `json:"agent_id"`
+	Status   string                 `json:"status"`
+	Output   map[string]interface{} `json:"output,omitempty"`
+	Error    string                 `json:"error,omitempty"`
+	Duration int                    `json:"duration"`
 }
 
 // ExecuteWorkflow 执行工作流
@@ -233,12 +235,12 @@ func (s *OrchestrateService) ExecuteWorkflow(ctx context.Context, input *Executi
 
 	// 创建执行记录
 	execution := &domain.WorkflowExecution{
-		WorkflowID:  input.WorkflowID,
-		UUID:        uuid.New().String(),
-		UserID:      input.UserID,
-		InputJSON:   string(inputJSON),
-		Status:      "pending",
-		CreatedAt:   time.Now(),
+		WorkflowID: input.WorkflowID,
+		UUID:       uuid.New().String(),
+		UserID:     input.UserID,
+		InputJSON:  string(inputJSON),
+		Status:     "pending",
+		CreatedAt:  time.Now(),
 	}
 	if err := s.repo.WorkflowExecution.Create(execution); err != nil {
 		return nil, fmt.Errorf("创建执行记录失败: %w", err)
@@ -282,70 +284,146 @@ func (s *OrchestrateService) executeWorkflowAsync(ctx context.Context, execution
 	var stepResults []StepResultOutput
 	var finalOutput map[string]interface{}
 	var execErr error
+	// 并行执行可同时运行的步骤：按照依赖关系动态调度
+	executed := make(map[string]bool)
+	muOutputs := sync.Mutex{}
+	muResults := sync.Mutex{}
 
-	// 构建步骤执行顺序（基于依赖关系）
+	totalSteps := len(steps)
+	stepByID := make(map[string]domain.WorkflowStep)
+	for _, st := range steps {
+		stepByID[st.ID] = st
+	}
+
+	// 计算拓扑顺序以便后续选择最终输出（不用于调度）
 	executionOrder := s.buildExecutionOrder(steps)
 
-	for _, step := range executionOrder {
-		// 检查是否已取消
+	for len(executed) < totalSteps {
+		// 检查取消
 		if ctx.Err() != nil {
 			execution.Status = "cancelled"
 			execErr = fmt.Errorf("工作流被取消")
 			break
 		}
 
-		// 构建步骤输入
-		stepInput := s.buildStepInput(step, stepOutputs, input)
-
-		// 创建步骤执行记录
-		stepExec := &domain.StepExecution{
-			ExecutionID: execution.ID,
-			StepID:      step.ID,
-			AgentID:     step.AgentID,
-			InputJSON:   "{}",
-			Status:      "pending",
-			CreatedAt:   time.Now(),
-		}
-		inputJSON, _ := json.Marshal(stepInput)
-		stepExec.InputJSON = string(inputJSON)
-		s.repo.StepExecution.Create(stepExec)
-
-		// 执行步骤
-		stepExec.Status = "running"
-		stepExec.StartedAt = time.Now()
-		s.repo.StepExecution.Update(stepExec)
-
-		result := s.executeStep(ctx, step, stepInput)
-		stepExec.CompletedAt = time.Now()
-		stepExec.Status = result.Status
-		stepExec.Error = result.Error
-
-		outputJSON, _ := json.Marshal(result.Output)
-		stepExec.OutputJSON = string(outputJSON)
-		s.repo.StepExecution.Update(stepExec)
-
-		stepResults = append(stepResults, result)
-
-		if result.Status == "failed" {
-			switch step.OnError {
-			case "skip":
-				// 跳过继续执行
+		// 收集当前可执行且未执行的步骤
+		runnable := make([]domain.WorkflowStep, 0)
+		for _, step := range steps {
+			if executed[step.ID] {
 				continue
-			case "stop":
-				// 停止工作流
-				execution.Status = "failed"
-				execErr = fmt.Errorf("步骤 %s 失败: %s", step.ID, result.Error)
-				break
-			default:
-				// 默认停止
-				execution.Status = "failed"
-				execErr = fmt.Errorf("步骤 %s 失败: %s", step.ID, result.Error)
-				break
+			}
+			// 检查条件：如果存在且为 false，则跳过执行（标记为已执行为 skipped）
+			if step.Condition != "" {
+				if !s.evalCondition(step.Condition, stepOutputs, input) {
+					// 标记为已执行，记录为 skipped
+					executed[step.ID] = true
+					se := StepResultOutput{StepID: step.ID, AgentID: step.AgentID, Status: "skipped", Output: map[string]interface{}{}, Duration: 0}
+					muResults.Lock()
+					stepResults = append(stepResults, se)
+					muResults.Unlock()
+					continue
+				}
+			}
+
+			canExecute := true
+			for _, from := range step.InputFrom {
+				if from != "input" && !executed[from] {
+					canExecute = false
+					break
+				}
+			}
+			if canExecute {
+				runnable = append(runnable, step)
 			}
 		}
 
-		// 存储步骤输出
-		stepOutputs[step.ID] = result.Output
+		if len(runnable) == 0 {
+			// 环形依赖或无法继续
+			execErr = fmt.Errorf("无法找到可执行步骤，可能存在未满足的依赖或环形依赖")
+			execution.Status = "failed"
+			break
+		}
+
+		// 并发执行这一批可运行步骤
+		var wg sync.WaitGroup
+		for _, step := range runnable {
+			wg.Add(1)
+			go func(st domain.WorkflowStep) {
+				defer wg.Done()
+
+				// 构建步骤输入（读 stepOutputs 需要锁）
+				muOutputs.Lock()
+				stepInput := s.buildStepInput(st, stepOutputs, input)
+				muOutputs.Unlock()
+
+				// 创建步骤执行记录
+				stepExec := &domain.StepExecution{
+					ExecutionID: execution.ID,
+					StepID:      st.ID,
+					AgentID:     st.AgentID,
+					InputJSON:   "{}",
+					Status:      "pending",
+					CreatedAt:   time.Now(),
+				}
+				inputJSON, _ := json.Marshal(stepInput)
+				stepExec.InputJSON = string(inputJSON)
+				_ = s.repo.StepExecution.Create(stepExec)
+
+				// 更新为 running
+				stepExec.Status = "running"
+				stepExec.StartedAt = time.Now()
+				_ = s.repo.StepExecution.Update(stepExec)
+
+				// per-step timeout 与重试
+				timeoutSec := st.Timeout
+				if timeoutSec <= 0 {
+					timeoutSec = 60
+				}
+				retryCount := st.RetryCount
+
+				// 执行并重试
+				res := s.executeStepWithRetries(ctx, st, stepInput, time.Duration(timeoutSec)*time.Second, retryCount)
+
+				stepExec.CompletedAt = time.Now()
+				stepExec.Status = res.Status
+				stepExec.Error = res.Error
+				outputJSON, _ := json.Marshal(res.Output)
+				stepExec.OutputJSON = string(outputJSON)
+				_ = s.repo.StepExecution.Update(stepExec)
+
+				// 保存结果并将输出合并到全局 outputs（需锁）
+				muResults.Lock()
+				stepResults = append(stepResults, res)
+				muResults.Unlock()
+
+				muOutputs.Lock()
+				stepOutputs[st.ID] = res.Output
+				muOutputs.Unlock()
+
+				// 处理失败策略
+				if res.Status == "failed" {
+					switch st.OnError {
+					case "skip":
+						// do nothing, already marked
+					case "stop":
+						execution.Status = "failed"
+						execErr = fmt.Errorf("步骤 %s 失败: %s", st.ID, res.Error)
+					default:
+						execution.Status = "failed"
+						execErr = fmt.Errorf("步骤 %s 失败: %s", st.ID, res.Error)
+					}
+				}
+
+				// 标记为已执行
+				executed[st.ID] = true
+			}(step)
+		}
+		wg.Wait()
+
+		// 若执行已由于某步失败而被设置为 failed，则停止循环
+		if execErr != nil {
+			break
+		}
 	}
 
 	// 汇总最终输出
@@ -354,7 +432,9 @@ func (s *OrchestrateService) executeWorkflowAsync(ctx context.Context, execution
 		// 找到最后一个步骤的输出作为最终输出
 		if len(executionOrder) > 0 {
 			lastStepID := executionOrder[len(executionOrder)-1].ID
-			finalOutput = stepOutputs[lastStepID]
+			if out, ok := stepOutputs[lastStepID]; ok {
+				finalOutput = out
+			}
 		}
 	}
 
@@ -462,21 +542,29 @@ func (s *OrchestrateService) executeStep(ctx context.Context, step domain.Workfl
 	chatInput.VendorKey = agent.ModelProvider
 	chatInput.ModelName = agent.ModelName
 
-	// 执行对话
+	// 执行对话（在 goroutine 中运行 HandleChat，并在返回后关闭 channel）
 	eventCh := make(chan domain.StreamEvent, 100)
-	err = s.chatService.HandleChat(ctx, chatInput, eventCh)
-	if err != nil {
-		result.Status = "failed"
-		result.Error = fmt.Sprintf("对话执行失败: %v", err)
-		return result
-	}
+	doneCh := make(chan error, 1)
+	go func() {
+		err := s.chatService.HandleChat(ctx, chatInput, eventCh)
+		doneCh <- err
+		close(eventCh)
+	}()
 
 	// 收集输出
 	var outputContent string
+	// 监听事件与结束信号
 	for event := range eventCh {
-		if event.Type == "content" {
+		if event.Type == "text" || event.Type == "content" {
 			outputContent += event.Content
 		}
+	}
+
+	// 等待 HandleChat 的返回结果
+	if err = <-doneCh; err != nil {
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("对话执行失败: %v", err)
+		return result
 	}
 
 	result.Status = "completed"
@@ -491,6 +579,203 @@ func (s *OrchestrateService) executeStep(ctx context.Context, step domain.Workfl
 	}
 
 	return result
+
+}
+
+// executeStepWithRetries 支持 per-step 超时与重试
+func (s *OrchestrateService) executeStepWithRetries(parentCtx context.Context, step domain.WorkflowStep, input map[string]interface{}, timeout time.Duration, retryCount int) StepResultOutput {
+	var lastErr error
+	var res StepResultOutput
+	for attempt := 0; attempt <= retryCount; attempt++ {
+		// 每次使用独立的上下文，以便单步超时可独立触发
+		stepCtx, cancel := context.WithTimeout(parentCtx, timeout)
+		start := time.Now()
+		res = s.executeStep(stepCtx, step, input)
+		res.Duration = int(time.Since(start).Seconds())
+		cancel()
+
+		if res.Status == "completed" {
+			return res
+		}
+		lastErr = fmt.Errorf("%s", res.Error)
+		// 简单退避：等待短时间后重试（可改进为指数退避）
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if lastErr != nil {
+		res.Status = "failed"
+		res.Error = lastErr.Error()
+		if res.Output == nil {
+			res.Output = map[string]interface{}{}
+		}
+	}
+	return res
+}
+
+// evalCondition 简单条件求值，支持形如 "input.foo == 'bar'" 或 "steps.step1.value > 10" 的表达式
+func (s *OrchestrateService) evalCondition(cond string, stepOutputs map[string]map[string]interface{}, workflowInput map[string]interface{}) bool {
+	// 支持的操作符
+	ops := []string{"==", "!=", ">=", "<=", ">", "<"}
+	var opFound string
+	for _, op := range ops {
+		if idx := strings.Index(cond, op); idx >= 0 {
+			opFound = op
+			break
+		}
+	}
+	if opFound == "" {
+		// 无操作符，尝试将整条作为布尔变量存在性判断
+		v := s.getVarValue(strings.TrimSpace(cond), stepOutputs, workflowInput)
+		if b, ok := v.(bool); ok {
+			return b
+		}
+		return v != nil && v != ""
+	}
+
+	parts := strings.SplitN(cond, opFound, 2)
+	if len(parts) != 2 {
+		return false
+	}
+	left := strings.TrimSpace(parts[0])
+	right := strings.TrimSpace(parts[1])
+
+	lval := s.getVarValue(left, stepOutputs, workflowInput)
+	rval := s.parseLiteralOrVar(right, stepOutputs, workflowInput)
+
+	// 尝试数值比较
+	lf, lerr := toFloat(lval)
+	rf, rerr := toFloat(rval)
+	if lerr == nil && rerr == nil {
+		switch opFound {
+		case "==":
+			return lf == rf
+		case "!=":
+			return lf != rf
+		case ">":
+			return lf > rf
+		case "<":
+			return lf < rf
+		case ">=":
+			return lf >= rf
+		case "<=":
+			return lf <= rf
+		}
+	}
+
+	// 字符串比较
+	ls := fmt.Sprintf("%v", lval)
+	rs := fmt.Sprintf("%v", rval)
+	switch opFound {
+	case "==":
+		return ls == rs
+	case "!=":
+		return ls != rs
+	case ">":
+		return ls > rs
+	case "<":
+		return ls < rs
+	case ">=":
+		return ls >= rs
+	case "<=":
+		return ls <= rs
+	}
+	return false
+}
+
+func toFloat(v interface{}) (float64, error) {
+	switch t := v.(type) {
+	case float64:
+		return t, nil
+	case float32:
+		return float64(t), nil
+	case int:
+		return float64(t), nil
+	case int64:
+		return float64(t), nil
+	case string:
+		return strconv.ParseFloat(t, 64)
+	default:
+		return 0, fmt.Errorf("无法转换为数字")
+	}
+}
+
+// parseLiteralOrVar 解析右侧是字面量还是变量名
+func (s *OrchestrateService) parseLiteralOrVar(token string, stepOutputs map[string]map[string]interface{}, workflowInput map[string]interface{}) interface{} {
+	t := strings.TrimSpace(token)
+	// 字符串字面量
+	if strings.HasPrefix(t, "'") && strings.HasSuffix(t, "'") {
+		return strings.Trim(t, "'")
+	}
+	if strings.HasPrefix(t, "\"") && strings.HasSuffix(t, "\"") {
+		return strings.Trim(t, "\"")
+	}
+	// 布尔字面量
+	if t == "true" {
+		return true
+	}
+	if t == "false" {
+		return false
+	}
+	// 数值尝试
+	if f, err := strconv.ParseFloat(t, 64); err == nil {
+		return f
+	}
+	// 否则视为变量名
+	return s.getVarValue(t, stepOutputs, workflowInput)
+}
+
+// getVarValue 支持访问 input.key 或 steps.stepID.key 或 stepID.key
+func (s *OrchestrateService) getVarValue(name string, stepOutputs map[string]map[string]interface{}, workflowInput map[string]interface{}) interface{} {
+	if name == "input" {
+		return workflowInput
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) == 0 {
+		return nil
+	}
+	if parts[0] == "input" {
+		if len(parts) == 1 {
+			return workflowInput
+		}
+		return deepGet(workflowInput, parts[1:])
+	}
+	if parts[0] == "steps" && len(parts) >= 3 {
+		// steps.<stepID>.<key>
+		sid := parts[1]
+		return deepGet(stepOutputs[sid], parts[2:])
+	}
+	// 支持直接 stepID.key
+	if out, ok := stepOutputs[parts[0]]; ok {
+		if len(parts) == 1 {
+			return out
+		}
+		return deepGet(out, parts[1:])
+	}
+	return nil
+}
+
+func deepGet(m map[string]interface{}, path []string) interface{} {
+	if m == nil {
+		return nil
+	}
+	cur := m
+	for i, p := range path {
+		if i == len(path)-1 {
+			if v, ok := cur[p]; ok {
+				return v
+			}
+			return nil
+		}
+		if nxt, ok := cur[p]; ok {
+			if nm, ok2 := nxt.(map[string]interface{}); ok2 {
+				cur = nm
+				continue
+			}
+			return nil
+		}
+		return nil
+	}
+	return nil
 }
 
 // formatInputAsPrompt 将输入格式化为提示词

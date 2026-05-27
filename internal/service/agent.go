@@ -53,7 +53,7 @@ func (s *AgentService) CreateAgent(req *CreateAgentRequest, createdBy uint) (*do
 		if req.ModelProvider == "" || req.ModelName == "" {
 			return nil, errors.New("模型提供者和模型名称不能为空")
 		}
-		if err := s.validateModel(req.ModelProvider, req.ModelName); err != nil {
+		if err := s.validateModel(req.ModelProvider); err != nil {
 			return nil, err
 		}
 	}
@@ -104,7 +104,7 @@ func (s *AgentService) UpdateAgent(id uint, req *CreateAgentRequest) (*domain.Ag
 
 	if !req.UseGlobalModelConfig {
 		if req.ModelProvider != "" && req.ModelName != "" {
-			if err := s.validateModel(req.ModelProvider, req.ModelName); err != nil {
+			if err := s.validateModel(req.ModelProvider); err != nil {
 				return nil, err
 			}
 			agent.ModelProvider = req.ModelProvider
@@ -164,8 +164,8 @@ func (s *AgentService) StopAgent(id uint) error {
 }
 
 // validateModel 验证模型是否可用
-func (s *AgentService) validateModel(provider, modelName string) error {
-	switch provider {
+func (s *AgentService) validateModel(provider string) error {
+	switch model.NormalizeProvider(provider) {
 	case "openai":
 		if s.openaiProvider == nil {
 			return errors.New("OpenAI提供者未配置")
@@ -174,8 +174,6 @@ func (s *AgentService) validateModel(provider, modelName string) error {
 		if s.localProvider == nil {
 			return errors.New("本地模型提供者未配置")
 		}
-	case "openrouter", "deepseek":
-		return nil
 	default:
 		return fmt.Errorf("不支持的模型提供者: %s", provider)
 	}

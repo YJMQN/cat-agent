@@ -67,10 +67,8 @@ func (s *MemoryService) StoreWorkingMemory(sessionID uint, content string, conte
 		wm.Messages = wm.Messages[len(wm.Messages)-20:]
 	}
 
-	if context != nil {
-		for k, v := range context {
-			wm.Context[k] = v
-		}
+	for k, v := range context {
+		wm.Context[k] = v
 	}
 	wm.LastAccess = time.Now()
 }
@@ -94,13 +92,13 @@ func (s *MemoryService) ConsolidateMemory(ctx context.Context, userID, sessionID
 	summary := s.summarizeMessages(wm.Messages)
 
 	memory := &domain.MemoryItem{
-		UserID:    userID,
-		SessionID: sessionID,
-		Level:     "short",
-		Type:      "summary",
-		Content:   summary,
+		UserID:     userID,
+		SessionID:  sessionID,
+		Level:      "short",
+		Type:       "summary",
+		Content:    summary,
 		Importance: 0.7,
-		CreatedAt: time.Now(),
+		CreatedAt:  time.Now(),
 	}
 
 	if err := s.repo.MemoryItem.Create(memory); err != nil {
@@ -177,7 +175,7 @@ func (s *MemoryService) StoreMemory(ctx context.Context, userID uint, memType, c
 func (s *MemoryService) extractKeywords(content string) string {
 	// 去除常见词
 	stopWords := map[string]bool{"的": true, "了": true, "是": true, "在": true, "有": true, "和": true, "就": true, "不": true, "人": true, "都": true, "一": true, "个": true, "上": true, "也": true, "很": true, "到": true, "说": true, "要": true, "去": true, "你": true, "会": true, "着": true, "没有": true, "看": true, "好": true, "自己": true, "这": true}
-	
+
 	words := strings.Fields(content)
 	freq := make(map[string]int)
 	for _, w := range words {
@@ -219,12 +217,12 @@ func (s *MemoryService) extractKeywords(content string) string {
 
 // CronScheduler Cron调度服务
 type CronScheduler struct {
-	repo       *repository.Repository
-	chat       *ChatService
-	cfg        *config.Config
-	jobs       map[uint]context.CancelFunc
-	mu         sync.Mutex
-	running    bool
+	repo    *repository.Repository
+	chat    *ChatService
+	cfg     *config.Config
+	jobs    map[uint]context.CancelFunc
+	mu      sync.Mutex
+	running bool
 }
 
 // NewCronScheduler 创建Cron调度器
@@ -383,11 +381,11 @@ func (s *TokenBudgetService) CheckAndRecord(userID uint, tokens int64) (bool, st
 	if err != nil {
 		// 创建默认预算
 		budget = &domain.TokenBudget{
-			UserID:        userID,
-			DailyLimit:    1000000,
-			MonthlyLimit:  30000000,
+			UserID:         userID,
+			DailyLimit:     1000000,
+			MonthlyLimit:   30000000,
 			AlertThreshold: 0.8,
-			LastResetDate: time.Now().Format("2006-01-02"),
+			LastResetDate:  time.Now().Format("2006-01-02"),
 		}
 		s.repo.TokenBudget.Create(budget)
 	}
@@ -458,9 +456,9 @@ func (s *ExportService) exportJSON(session *domain.Session, messages []domain.Me
 		Time    string `json:"time"`
 	}
 	type export struct {
-		Title    string       `json:"title"`
-		Exported string       `json:"exported_at"`
-		Messages []exportMsg  `json:"messages"`
+		Title    string      `json:"title"`
+		Exported string      `json:"exported_at"`
+		Messages []exportMsg `json:"messages"`
 	}
 
 	var msgs []exportMsg
@@ -637,11 +635,13 @@ func (e *PluginEngine) RunPlugin(ctx context.Context, pluginID uint, params map[
 
 // runHTTPPlugin 运行HTTP插件
 func (e *PluginEngine) runHTTPPlugin(ctx context.Context, plugin *domain.Plugin, params map[string]interface{}) (string, error) {
+	_ = ctx
 	return fmt.Sprintf("[HTTP插件] %s - 端点: %s, 参数: %v", plugin.Name, plugin.Endpoint, params), nil
 }
 
 // runScriptPlugin 运行脚本插件
 func (e *PluginEngine) runScriptPlugin(ctx context.Context, plugin *domain.Plugin, params map[string]interface{}) (string, error) {
+	_ = ctx
 	return fmt.Sprintf("[脚本插件] %s - 语言: %s, 参数: %v", plugin.Name, plugin.ScriptLang, params), nil
 }
 

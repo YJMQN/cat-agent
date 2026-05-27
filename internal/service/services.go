@@ -16,9 +16,9 @@ type Services struct {
 	Orchestrate *OrchestrateService // 多Agent协作编排服务
 
 	// 第三阶段：智能能力增强
-	Memory       *MemoryService    // 智能记忆系统
-	CronScheduler *CronScheduler  // Cron调度器
-	PluginEngine *PluginEngine    // 动态插件引擎
+	Memory        *MemoryService // 智能记忆系统
+	CronScheduler *CronScheduler // Cron调度器
+	PluginEngine  *PluginEngine  // 动态插件引擎
 
 	// 第四阶段：体验优化与扩展
 	Export      *ExportService      // 对话导出
@@ -42,21 +42,21 @@ func NewServices(repo *repository.Repository, cfg *config.Config) *Services {
 	chatService := NewChatService(repo, openaiProvider, localProvider, toolRegistry, cfg)
 
 	return &Services{
-		Auth:         NewAuthService(repo, cfg),
-		Agent:        NewAgentService(repo, openaiProvider, localProvider, toolRegistry),
-		Chat:         chatService,
-		Admin:        NewAdminService(repo),
-		Orchestrate:  NewOrchestrateService(repo, chatService, cfg),
+		Auth:        NewAuthService(repo, cfg),
+		Agent:       NewAgentService(repo, openaiProvider, localProvider, toolRegistry),
+		Chat:        chatService,
+		Admin:       NewAdminService(repo),
+		Orchestrate: NewOrchestrateService(repo, chatService, cfg),
 
 		// 第三阶段
-		Memory:       NewMemoryService(repo, cfg),
+		Memory:        NewMemoryService(repo, cfg),
 		CronScheduler: NewCronScheduler(repo, chatService, cfg),
 		PluginEngine:  NewPluginEngine(repo, cfg),
 
 		// 第四阶段
-		Export:       NewExportService(repo, cfg),
-		RAG:          NewRAGService(repo, cfg),
-		TokenBudget:  NewTokenBudgetService(repo),
+		Export:      NewExportService(repo, cfg),
+		RAG:         NewRAGService(repo, cfg),
+		TokenBudget: NewTokenBudgetService(repo),
 	}
 }
 
@@ -87,16 +87,10 @@ func loadModelConfigs(repo *repository.Repository) []model.ProviderConfig {
 func newProviderFromDB(configs []model.ProviderConfig, providerName string) model.ModelProvider {
 	for _, c := range configs {
 		if c.Provider == providerName {
-			// local/ollama 使用 Ollama API，其余统一使用 OpenAI 兼容协议
-			if providerName == "local" || providerName == "ollama" {
-				return model.NewLocalModelProviderFromConfig(&c)
-			}
-			return model.NewOpenAIProviderFromConfig(&c)
+			return model.NewLLMProviderFromConfig(&c)
 		}
 	}
-	// 未找到，返回默认
-	if providerName == "local" || providerName == "ollama" {
-		return model.NewLocalModelProvider("http://localhost:11434")
-	}
-	return model.NewOpenAIProvider("https://api.openai.com/v1", "")
+	// 未找到，返回默认配置
+	baseURL, apiKey, _ := model.DefaultProviderConfig(providerName)
+	return model.NewLLMProvider(providerName, baseURL, apiKey)
 }

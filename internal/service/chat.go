@@ -19,12 +19,12 @@ import (
 
 // ChatService 对话服务 - Agent核心循环
 type ChatService struct {
-	repo              *repository.Repository
-	openaiProvider    model.ModelProvider
-	localProvider     model.ModelProvider
-	toolRegistry      *tool.Registry
-	cfg               *config.Config
-	pendingApprovals  map[string]*PendingToolApproval
+	repo               *repository.Repository
+	openaiProvider     model.ModelProvider
+	localProvider      model.ModelProvider
+	toolRegistry       *tool.Registry
+	cfg                *config.Config
+	pendingApprovals   map[string]*PendingToolApproval
 	pendingApprovalsMu sync.Mutex
 }
 
@@ -236,6 +236,7 @@ func (s *ChatService) handleStreamResponse(
 	agentCfg *domain.AgentConfig,
 	eventCh chan<- domain.StreamEvent,
 ) error {
+	_ = agentCfg
 	chunks, err := mdl.StreamChat(ctx, req)
 	if err != nil {
 		return fmt.Errorf("模型流式调用失败: %w", err)
@@ -325,6 +326,7 @@ func (s *ChatService) handleSyncResponse(
 	agentCfg *domain.AgentConfig,
 	eventCh chan<- domain.StreamEvent,
 ) error {
+	_ = agentCfg
 	resp, err := mdl.Chat(ctx, req)
 	if err != nil {
 		return fmt.Errorf("模型调用失败: %w", err)
@@ -406,18 +408,18 @@ func (s *ChatService) executeTool(ctx context.Context, tc model.ToolCall, sessio
 		s.pendingApprovalsMu.Unlock()
 
 		return &domain.StreamEvent{
-			Type:            "tool_confirmation",
-			Content:         fmt.Sprintf("需要确认才会执行本地命令：%s", tc.Function.Name),
-			Tool:            tc.Function.Name,
-			Args:            tc.Function.Arguments,
-			ConfirmationID:  approvalID,
+			Type:           "tool_confirmation",
+			Content:        fmt.Sprintf("需要确认才会执行本地命令：%s", tc.Function.Name),
+			Tool:           tc.Function.Name,
+			Args:           tc.Function.Arguments,
+			ConfirmationID: approvalID,
 		}, approvalID, nil
 	}
 
-	return s.executeToolNow(ctx, tc.Function.Name, tc.Function.Arguments, tc.ID)
+	return s.executeToolNow(ctx, tc.Function.Name, tc.Function.Arguments)
 }
 
-func (s *ChatService) executeToolNow(ctx context.Context, toolName string, argsJSON string, toolCallID string) (*domain.StreamEvent, string, error) {
+func (s *ChatService) executeToolNow(ctx context.Context, toolName string, argsJSON string) (*domain.StreamEvent, string, error) {
 	t, ok := s.toolRegistry.Get(toolName)
 	if !ok {
 		return &domain.StreamEvent{Type: "tool_result", Content: fmt.Sprintf("错误：工具 %s 不存在", toolName), Tool: toolName}, "", nil
@@ -462,7 +464,7 @@ func (s *ChatService) ExecutePendingTool(approvalID string, approved bool, sessi
 		return &domain.StreamEvent{Type: "tool_result", Content: result, Tool: pending.ToolName}, nil
 	}
 
-	event, _, err := s.executeToolNow(context.Background(), pending.ToolName, pending.Arguments, pending.ToolCallID)
+	event, _, err := s.executeToolNow(context.Background(), pending.ToolName, pending.Arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -501,6 +503,7 @@ func (s *ChatService) getOrCreateSession(input *ChatInput) (*domain.Session, err
 
 // buildMemoryContext 构建记忆上下文
 func (s *ChatService) buildMemoryContext(userID, sessionID uint) (string, error) {
+	_ = sessionID
 	memories, err := s.repo.Memory.GetByUser(userID)
 	if err != nil {
 		return "", err
@@ -614,18 +617,7 @@ func (s *ChatService) getModelDefaults(provider string) (baseURL, apiKey, modelN
 	}
 
 	// 数据库无配置时，使用硬编码降级默认值
-	defaults := map[string][3]string{
-		"openai":     {"https://api.openai.com/v1", "", "gpt-4o-mini"},
-		"deepseek":   {"https://api.deepseek.com/v1", "", "deepseek-chat"},
-		"openrouter": {"https://openrouter.ai/api/v1", "", "openai/gpt-4o-mini"},
-		"modelscope": {"https://api-inference.modelscope.cn/v1", "", "Qwen/Qwen2.5-7B-Instruct"},
-		"local":      {"http://localhost:11434", "", "qwen2.5"},
-		"ollama":     {"http://localhost:11434", "", "qwen2.5"},
-	}
-	if def, ok := defaults[provider]; ok {
-		return def[0], def[1], def[2]
-	}
-	return "", "", ""
+	return model.DefaultProviderConfig(provider)
 }
 
 // resolveModelConfig 解析请求覆盖后的模型配置
@@ -662,7 +654,7 @@ func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *Ch
 		if modelName == "" {
 			return "", "", "", "", fmt.Errorf("模型名称不能为空")
 		}
-		return "openai", baseURL, apiKey, modelName, nil
+		return provider, baseURL, apiKey, modelName, nil
 	}
 
 	// 统一从数据库获取默认配置
@@ -679,16 +671,7 @@ func (s *ChatService) resolveModelConfig(agentCfg *domain.AgentConfig, input *Ch
 		}
 	}
 
-	// 映射到模型SDK类型：openrouter/modelscope/custom 使用 OpenAI 兼容协议
-	sdkProvider := provider
-	switch provider {
-	case "openrouter", "modelscope", "custom":
-		sdkProvider = "openai"
-	case "ollama":
-		sdkProvider = "local"
-	}
-
-	return sdkProvider, baseURL, apiKey, modelName, nil
+	return model.SDKProviderName(provider), baseURL, apiKey, modelName, nil
 }
 
 // getModel 根据配置获取模型实例
@@ -698,22 +681,13 @@ func (s *ChatService) getModel(agentCfg *domain.AgentConfig, input *ChatInput) (
 		return nil, err
 	}
 
-	switch provider {
-	case "openai":
-		return model.NewOpenAIProvider(baseURL, apiKey).Create(modelName)
-	case "local", "ollama":
-		return model.NewLocalModelProvider(baseURL).Create(modelName)
-	default:
-		return nil, fmt.Errorf("不支持的模型提供者: %s", provider)
-	}
+	return model.NewLLMProvider(provider, baseURL, apiKey).Create(modelName)
 }
 
 // updateMemory 异步更新用户记忆
 func (s *ChatService) updateMemory(userID, sessionID uint, content string) {
 	// 简化实现：提取关键信息存入记忆
 	// 实际应用中可以调用LLM进行摘要提取
-	ctx := context.Background()
-	_ = ctx
 
 	// 示例：记录会话摘要
 	_ = s.repo.Memory.Create(&domain.Memory{
