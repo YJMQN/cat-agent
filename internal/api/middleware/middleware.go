@@ -3,8 +3,11 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
 
 // CORS 跨域中间件
@@ -77,6 +80,78 @@ func AdminOnly() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		c.Next()
+	}
+}
+
+// ========== 第一阶段安全加固: 速率限制中间件 ==========
+
+// RateLimiter 速率限制器结构
+type RateLimiter struct {
+	limiters sync.Map // key: IP地址, value: *rate.Limiter
+	mu       sync.Mutex
+	rps      int // 每秒请求数
+	burst    int // 突发上限
+}
+
+// NewRateLimiter 创建速率限制器
+func NewRateLimiter(rps, burst int) *RateLimiter {
+	return &RateLimiter{
+		rps:   rps,
+		burst: burst,
+	}
+}
+
+// GetLimiter 获取或创建指定IP的限流器
+func (rl *RateLimiter) GetLimiter(ip string) *rate.Limiter {
+	if limiter, ok := rl.limiters.Load(ip); ok {
+		return limiter.(*rate.Limiter)
+	}
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	// 再次检查避免并发创建
+	if limiter, ok := rl.limiters.Load(ip); ok {
+		return limiter.(*rate.Limiter)
+	}
+
+	limiter := rate.NewLimiter(rate.Limit(rl.rps), rl.burst)
+	rl.limiters.Store(ip, limiter)
+	return limiter
+}
+
+// CleanupLimiters 定期清理过期的限流器
+func (rl *RateLimiter) CleanupLimiters(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		for range ticker.C {
+			rl.limiters.Clear()
+		}
+	}()
+}
+
+// globalRateLimiter 全局速率限制器实例
+var globalRateLimiter *RateLimiter
+
+// RateLimit 速率限制中间件
+func RateLimit(rps, burst int) gin.HandlerFunc {
+	globalRateLimiter = NewRateLimiter(rps, burst)
+	globalRateLimiter.CleanupLimiters(10 * time.Minute)
+
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+		limiter := globalRateLimiter.GetLimiter(ip)
+
+		if !limiter.Allow() {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error": "请求过于频繁，请稍后再试",
+				"retry_after": "1s",
+			})
+			c.Abort()
+			return
+		}
+
 		c.Next()
 	}
 }

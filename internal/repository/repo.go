@@ -9,27 +9,33 @@ import (
 
 // Repository 仓储层接口集合
 type Repository struct {
-	User    UserRepository
-	Agent   AgentRepository
-	Tool    ToolRepository
-	Session SessionRepository
-	Message MessageRepository
-	Memory  MemoryRepository
-	Audit   AuditRepository
-	Stats   StatsRepository
+	User              UserRepository
+	Agent             AgentRepository
+	Tool              ToolRepository
+	Session           SessionRepository
+	Message           MessageRepository
+	Memory            MemoryRepository
+	Audit             AuditRepository
+	Stats             StatsRepository
+	Workflow          WorkflowRepository          // 多Agent协作编排
+	WorkflowExecution WorkflowExecutionRepository // 工作流执行记录
+	StepExecution     StepExecutionRepository     // 步骤执行记录
 }
 
 // New 创建仓储层实例
 func New(db *gorm.DB) *Repository {
 	return &Repository{
-		User:    &userRepo{db: db},
-		Agent:   &agentRepo{db: db},
-		Tool:    &toolRepo{db: db},
-		Session: &sessionRepo{db: db},
-		Message: &messageRepo{db: db},
-		Memory:  &memoryRepo{db: db},
-		Audit:   &auditRepo{db: db},
-		Stats:   &statsRepo{db: db},
+		User:              &userRepo{db: db},
+		Agent:             &agentRepo{db: db},
+		Tool:              &toolRepo{db: db},
+		Session:           &sessionRepo{db: db},
+		Message:           &messageRepo{db: db},
+		Memory:            &memoryRepo{db: db},
+		Audit:             &auditRepo{db: db},
+		Stats:             &statsRepo{db: db},
+		Workflow:          &workflowRepo{db: db},
+		WorkflowExecution: &workflowExecutionRepo{db: db},
+		StepExecution:     &stepExecutionRepo{db: db},
 	}
 }
 
@@ -313,3 +319,84 @@ func (r *statsRepo) ToolRanking() ([]map[string]interface{}, error) {
 		Scan(&results)
 	return results, nil
 }
+
+// ========== 多Agent协作编排仓储 ==========
+
+// WorkflowRepository 工作流仓储接口
+type WorkflowRepository interface {
+	Create(workflow *domain.Workflow) error
+	GetByID(id uint) (*domain.Workflow, error)
+	List(userID uint) ([]domain.Workflow, error)
+	Update(workflow *domain.Workflow) error
+	Delete(id uint) error
+}
+
+// WorkflowExecutionRepository 工作流执行仓储接口
+type WorkflowExecutionRepository interface {
+	Create(execution *domain.WorkflowExecution) error
+	GetByID(id uint) (*domain.WorkflowExecution, error)
+	GetByUUID(uuid string) (*domain.WorkflowExecution, error)
+	List(workflowID uint) ([]domain.WorkflowExecution, error)
+	Update(execution *domain.WorkflowExecution) error
+}
+
+// StepExecutionRepository 步骤执行仓储接口
+type StepExecutionRepository interface {
+	Create(stepExec *domain.StepExecution) error
+	GetByID(id uint) (*domain.StepExecution, error)
+	ListByExecution(executionID uint) ([]domain.StepExecution, error)
+	Update(stepExec *domain.StepExecution) error
+}
+
+// ========== 工作流仓储实现 ==========
+
+type workflowRepo struct{ db *gorm.DB }
+
+func (r *workflowRepo) Create(workflow *domain.Workflow) error { return r.db.Create(workflow).Error }
+func (r *workflowRepo) GetByID(id uint) (*domain.Workflow, error) {
+	var w domain.Workflow
+	err := r.db.First(&w, id).Error
+	return &w, err
+}
+func (r *workflowRepo) List(userID uint) ([]domain.Workflow, error) {
+	var workflows []domain.Workflow
+	err := r.db.Where("created_by = ?", userID).Order("updated_at DESC").Find(&workflows).Error
+	return workflows, err
+}
+func (r *workflowRepo) Update(workflow *domain.Workflow) error { return r.db.Save(workflow).Error }
+func (r *workflowRepo) Delete(id uint) error                    { return r.db.Delete(&domain.Workflow{}, id).Error }
+
+type workflowExecutionRepo struct{ db *gorm.DB }
+
+func (r *workflowExecutionRepo) Create(execution *domain.WorkflowExecution) error { return r.db.Create(execution).Error }
+func (r *workflowExecutionRepo) GetByID(id uint) (*domain.WorkflowExecution, error) {
+	var e domain.WorkflowExecution
+	err := r.db.First(&e, id).Error
+	return &e, err
+}
+func (r *workflowExecutionRepo) GetByUUID(uuid string) (*domain.WorkflowExecution, error) {
+	var e domain.WorkflowExecution
+	err := r.db.Where("uuid = ?", uuid).First(&e).Error
+	return &e, err
+}
+func (r *workflowExecutionRepo) List(workflowID uint) ([]domain.WorkflowExecution, error) {
+	var executions []domain.WorkflowExecution
+	err := r.db.Where("workflow_id = ?", workflowID).Order("created_at DESC").Find(&executions).Error
+	return executions, err
+}
+func (r *workflowExecutionRepo) Update(execution *domain.WorkflowExecution) error { return r.db.Save(execution).Error }
+
+type stepExecutionRepo struct{ db *gorm.DB }
+
+func (r *stepExecutionRepo) Create(stepExec *domain.StepExecution) error { return r.db.Create(stepExec).Error }
+func (r *stepExecutionRepo) GetByID(id uint) (*domain.StepExecution, error) {
+	var s domain.StepExecution
+	err := r.db.First(&s, id).Error
+	return &s, err
+}
+func (r *stepExecutionRepo) ListByExecution(executionID uint) ([]domain.StepExecution, error) {
+	var stepExecs []domain.StepExecution
+	err := r.db.Where("execution_id = ?", executionID).Order("created_at ASC").Find(&stepExecs).Error
+	return stepExecs, err
+}
+func (r *stepExecutionRepo) Update(stepExec *domain.StepExecution) error { return r.db.Save(stepExec).Error }

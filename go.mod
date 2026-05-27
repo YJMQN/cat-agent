@@ -7,6 +7,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
 	golang.org/x/crypto v0.21.0
+	golang.org/x/time v0.5.0 // 速率限制支持
 	gorm.io/driver/sqlite v1.5.5
 	gorm.io/gorm v1.25.7
 )

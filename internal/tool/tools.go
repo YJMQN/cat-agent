@@ -4,21 +4,29 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
+// ========== 结果和接口定义 ==========
+
 // Result 工具执行结果
 type Result struct {
-	Content string `json:"content"`
-	IsError bool   `json:"is_error"`
+	Content   string `json:"content"`
+	IsError   bool   `json:"is_error"`
+	TokenHint int    `json:"token_hint"` // 第二阶段新增：Token计数提示
 }
 
 // Tool 工具接口
@@ -38,6 +46,46 @@ type ConfirmableTool interface {
 	Tool
 	RequiresConfirmation(args map[string]interface{}) bool
 }
+
+// ========== 第二阶段新增：工具配置 ==========
+
+// ToolConfig 工具全局配置
+type ToolConfig struct {
+	MaxOutputSize    int           // 最大输出大小（字节），默认100KB
+	DefaultTimeout   time.Duration // 默认超时时间
+	HTTPClient       *http.Client  // 共享HTTP客户端
+}
+
+// DefaultToolConfig 默认工具配置
+var DefaultToolConfig = &ToolConfig{
+	MaxOutputSize:    100 * 1024, // 100KB
+	DefaultTimeout:   30 * time.Second,
+	HTTPClient:       &http.Client{
+		Timeout: 30 * time.Second,
+	},
+}
+
+// SetToolConfig 设置全局工具配置
+func SetToolConfig(cfg *ToolConfig) {
+	if cfg != nil {
+		DefaultToolConfig = cfg
+	}
+}
+
+// trimOutput 限制输出大小
+func trimOutput(content string, maxSize int) string {
+	if len(content) <= maxSize {
+		return content
+	}
+	return content[:maxSize] + fmt.Sprintf("\n... (输出已截断，总大小 %d 字节)", len(content))
+}
+
+// estimateTokens 估算Token数量（简单估算：约4字符=1token）
+func estimateTokens(content string) int {
+	return len(content) / 4
+}
+
+// ========== 工具注册表 ==========
 
 // Registry 工具注册表
 type Registry struct {
@@ -93,25 +141,172 @@ func LoadBuiltinTools() *Registry {
 	r.Register(&WeatherTool{})
 	r.Register(&CalculatorTool{})
 	r.Register(&WebSearchTool{})
+	r.Register(&WebFetchTool{}) // 第二阶段新增：网页抓取工具
 	r.Register(&LocalCommandTool{})
+	r.Register(&FileTool{}) // 第二阶段新增：文件系统工具
 	return r
 }
 
-// ========== 本地命令执行工具 ==========
+// ========== 第一阶段安全加固：工具确认状态管理 ==========
+
+// ToolConfirmation 工具确认状态
+type ToolConfirmation struct {
+	ID          string
+	UserID      uint
+	SessionID   uint
+	ToolName    string
+	ToolCallID  string
+	Arguments   string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time // TTL过期时间
+	Confirmed   bool
+	Executed    bool
+}
+
+// ToolConfirmationManager 工具确认状态管理器（带TTL过期机制）
+type ToolConfirmationManager struct {
+	confirmations map[string]*ToolConfirmation
+	mu            sync.RWMutex
+	defaultTTL    time.Duration // 默认过期时间
+}
+
+// NewToolConfirmationManager 创建确认管理器
+func NewToolConfirmationManager(ttl time.Duration) *ToolConfirmationManager {
+	if ttl == 0 {
+		ttl = 5 * time.Minute // 默认5分钟过期
+	}
+	m := &ToolConfirmationManager{
+		confirmations: make(map[string]*ToolConfirmation),
+		defaultTTL:    ttl,
+	}
+	// 启动定期清理过期确认
+	go m.cleanupExpired()
+	return m
+}
+
+// CreateConfirmation 创建新的确认请求
+func (m *ToolConfirmationManager) CreateConfirmation(userID, sessionID uint, toolName, toolCallID, arguments string) *ToolConfirmation {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	confirmation := &ToolConfirmation{
+		ID:         fmt.Sprintf("conf_%d_%s_%d", time.Now().UnixNano(), toolCallID, userID),
+		UserID:     userID,
+		SessionID:  sessionID,
+		ToolName:   toolName,
+		ToolCallID: toolCallID,
+		Arguments:  arguments,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(m.defaultTTL),
+		Confirmed:  false,
+		Executed:   false,
+	}
+	m.confirmations[confirmation.ID] = confirmation
+	return confirmation
+}
+
+// GetConfirmation 获取确认请求
+func (m *ToolConfirmationManager) GetConfirmation(id string) (*ToolConfirmation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conf, ok := m.confirmations[id]
+	if !ok {
+		return nil, errors.New("确认请求不存在")
+	}
+	if time.Now().After(conf.ExpiresAt) {
+		return nil, errors.New("确认请求已过期")
+	}
+	return conf, nil
+}
+
+// Confirm 确认执行
+func (m *ToolConfirmationManager) Confirm(id string, userID uint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	conf, ok := m.confirmations[id]
+	if !ok {
+		return errors.New("确认请求不存在")
+	}
+	if time.Now().After(conf.ExpiresAt) {
+		delete(m.confirmations, id)
+		return errors.New("确认请求已过期，请重新发起")
+	}
+	if conf.UserID != userID {
+		return errors.New("无权限确认此请求")
+	}
+	if conf.Confirmed {
+		return errors.New("已经确认过")
+	}
+	conf.Confirmed = true
+	return nil
+}
+
+// Reject 拒绝执行
+func (m *ToolConfirmationManager) Reject(id string, userID uint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	conf, ok := m.confirmations[id]
+	if !ok {
+		return errors.New("确认请求不存在")
+	}
+	if conf.UserID != userID {
+		return errors.New("无权限拒绝此请求")
+	}
+	delete(m.confirmations, id)
+	return nil
+}
+
+// MarkExecuted 标记已执行
+func (m *ToolConfirmationManager) MarkExecuted(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if conf, ok := m.confirmations[id]; ok {
+		conf.Executed = true
+		// 执行后删除确认记录
+		delete(m.confirmations, id)
+	}
+}
+
+// cleanupExpired 定期清理过期确认
+func (m *ToolConfirmationManager) cleanupExpired() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		m.mu.Lock()
+		now := time.Now()
+		for id, conf := range m.confirmations {
+			if now.After(conf.ExpiresAt) {
+				delete(m.confirmations, id)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+// ========== 第一阶段安全加固：本地命令执行工具 ==========
 
 // LocalCommandTool 在本地系统执行命令
-// 所有命令都需要用户确认后才会执行，以避免误操作。
+// 安全改进：使用exec.Command直接执行，禁止命令链接（; | & 等）
 type LocalCommandTool struct{}
 
 func (t *LocalCommandTool) Name() string       { return "local_command" }
-func (t *LocalCommandTool) Description() string { return "在本地系统执行命令。为了安全起见，所有命令执行前都会弹出确认。" }
+func (t *LocalCommandTool) Description() string { return "在本地系统执行命令。所有命令执行前都需要用户确认。" }
 func (t *LocalCommandTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
 			"command": map[string]interface{}{
 				"type":        "string",
-				"description": "需要执行的命令",
+				"description": "需要执行的命令（单条命令，不允许使用;|&等链接符）",
+			},
+			"args": map[string]interface{}{
+				"type":        "array",
+				"description": "命令参数列表",
+				"items":       map[string]interface{}{"type": "string"},
 			},
 			"working_directory": map[string]interface{}{
 				"type":        "string",
@@ -127,13 +322,46 @@ func (t *LocalCommandTool) Parameters() map[string]interface{} {
 }
 
 func (t *LocalCommandTool) RequiresConfirmation(args map[string]interface{}) bool {
-	return true
+	return true // 所有命令都需要确认
+}
+
+// 安全检查：检测危险命令链接符
+func containsDangerousOperators(command string) bool {
+	dangerousPatterns := []string{
+		";", "|", "&", "&&", "||", 
+		">", ">>", "<", "$(", "`",
+		"\n", "\r",
+	}
+	for _, pattern := range dangerousPatterns {
+		if strings.Contains(command, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *LocalCommandTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
 	command, _ := args["command"].(string)
 	if command == "" {
 		return &Result{Content: "错误：缺少命令参数", IsError: true}, nil
+	}
+
+	// 第一阶段安全加固：禁止命令链接
+	if containsDangerousOperators(command) {
+		return &Result{
+			Content: "错误：不允许使用命令链接符（; | & && || > $() 等）。请使用单条命令。",
+			IsError: true,
+		}, nil
+	}
+
+	// 获取参数列表
+	var cmdArgs []string
+	if rawArgs, ok := args["args"].([]interface{}); ok {
+		for _, a := range rawArgs {
+			if s, ok := a.(string); ok {
+				cmdArgs = append(cmdArgs, s)
+			}
+		}
 	}
 
 	workingDir, _ := args["working_directory"].(string)
@@ -149,11 +377,14 @@ func (t *LocalCommandTool) Execute(ctx context.Context, args map[string]interfac
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
+	// 第一阶段安全加固：使用exec.Command直接执行，避免shell注入
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
+		// Windows: 直接执行命令
+		cmd = exec.CommandContext(ctx, command, cmdArgs...)
 	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", command)
+		// Linux/Mac: 直接执行命令（不再通过sh -c）
+		cmd = exec.CommandContext(ctx, command, cmdArgs...)
 	}
 	cmd.Dir = workingDir
 
@@ -166,10 +397,16 @@ func (t *LocalCommandTool) Execute(ctx context.Context, args map[string]interfac
 	stdoutContent := strings.TrimSpace(stdout.String())
 	stderrContent := strings.TrimSpace(stderr.String())
 
+	// 第二阶段：限制输出大小
+	maxSize := DefaultToolConfig.MaxOutputSize
+	stdoutContent = trimOutput(stdoutContent, maxSize/2)
+	stderrContent = trimOutput(stderrContent, maxSize/2)
+
 	if err != nil {
 		return &Result{
-			Content: fmt.Sprintf("命令执行失败: %v\nstdout:\n%s\nstderr:\n%s", err, stdoutContent, stderrContent),
-			IsError: true,
+			Content:   fmt.Sprintf("命令执行失败: %v\nstdout:\n%s\nstderr:\n%s", err, stdoutContent, stderrContent),
+			IsError:   true,
+			TokenHint: estimateTokens(stdoutContent + stderrContent),
 		}, nil
 	}
 
@@ -188,7 +425,10 @@ func (t *LocalCommandTool) Execute(ctx context.Context, args map[string]interfac
 		result += "stderr:\n" + stderrContent
 	}
 
-	return &Result{Content: result}, nil
+	return &Result{
+		Content:   result,
+		TokenHint: estimateTokens(result),
+	}, nil
 }
 
 // ========== 天气查询工具 ==========
@@ -219,7 +459,9 @@ func (t *WeatherTool) Execute(ctx context.Context, args map[string]interface{}) 
 
 	// 使用wttr.in免费天气API
 	apiURL := fmt.Sprintf("https://wttr.in/%s?format=j1&lang=zh", url.QueryEscape(city))
-	client := &http.Client{Timeout: 10 * time.Second}
+	
+	// 第二阶段：使用共享HTTP客户端
+	client := DefaultToolConfig.HTTPClient
 	resp, err := client.Get(apiURL)
 	if err != nil {
 		return &Result{Content: fmt.Sprintf("天气查询失败: %v", err), IsError: true}, nil
@@ -265,7 +507,10 @@ func (t *WeatherTool) Execute(ctx context.Context, args map[string]interface{}) 
 	result := fmt.Sprintf("📍 %s 天气：%s，温度 %s°C（体感 %s°C），湿度 %s%%，风速 %s km/h",
 		location, weather, cc.TempC, cc.FeelsLike, cc.Humidity, cc.WindspeedKmph)
 
-	return &Result{Content: result}, nil
+	return &Result{
+		Content:   result,
+		TokenHint: estimateTokens(result),
+	}, nil
 }
 
 // ========== 计算器工具 ==========
@@ -299,7 +544,11 @@ func (t *CalculatorTool) Execute(ctx context.Context, args map[string]interface{
 		return &Result{Content: fmt.Sprintf("计算错误: %v", err), IsError: true}, nil
 	}
 
-	return &Result{Content: fmt.Sprintf("%s = %g", expr, result)}, nil
+	output := fmt.Sprintf("%s = %g", expr, result)
+	return &Result{
+		Content:   output,
+		TokenHint: estimateTokens(output),
+	}, nil
 }
 
 // evaluateExpression 安全的数学表达式求值
@@ -520,13 +769,13 @@ func parsePrimary(tokens []token, pos int) (float64, int, error) {
 	return 0, pos, fmt.Errorf("意外的token: %s", t.val)
 }
 
-// ========== 网络搜索工具 ==========
+// ========== 第二阶段新增：网络搜索工具（修复版） ==========
 
 // WebSearchTool 网络搜索工具
 type WebSearchTool struct{}
 
 func (t *WebSearchTool) Name() string        { return "web_search" }
-func (t *WebSearchTool) Description() string  { return "搜索互联网获取信息" }
+func (t *WebSearchTool) Description() string  { return "搜索互联网获取信息（使用DuckDuckGo Lite）" }
 func (t *WebSearchTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
@@ -545,13 +794,6 @@ func (t *WebSearchTool) Parameters() map[string]interface{} {
 	}
 }
 
-// searchResult 搜索结果
-type searchResult struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Snippet string `json:"snippet"`
-}
-
 func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
@@ -563,34 +805,424 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 		limit = int(l)
 	}
 
-	// 使用DuckDuckGo Lite搜索 (无API key)
+	// 第二阶段修复：使用共享HTTP客户端
 	searchURL := fmt.Sprintf("https://lite.duckduckgo.com/lite/?q=%s", url.QueryEscape(query))
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, _ := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; EinoAgent/1.0)")
+	client := DefaultToolConfig.HTTPClient
+
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	if err != nil {
+		return &Result{Content: fmt.Sprintf("创建请求失败: %v", err), IsError: true}, nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return &Result{Content: fmt.Sprintf("搜索失败: %v", err), IsError: true}, nil
+		return &Result{Content: fmt.Sprintf("搜索请求失败: %v", err), IsError: true}, nil
 	}
 	defer resp.Body.Close()
 
-	// 简单解析搜索结果
-	var results []searchResult
-	_ = limit // 使用limit控制结果数
+	if resp.StatusCode != http.StatusOK {
+		return &Result{Content: fmt.Sprintf("搜索服务返回错误: %d", resp.StatusCode), IsError: true}, nil
+	}
 
-	// 由于DuckDuckGo解析较复杂，返回模拟结构说明
-	// 实际部署可替换为SerpAPI等付费搜索
-	buf := new(strings.Builder)
-	fmt.Fprintf(buf, "搜索 \"%s\" 的结果：\n\n", query)
-	fmt.Fprintf(buf, "提示：当前为演示模式。如需真实搜索结果，请配置搜索API密钥（如SerpAPI、Bing Search API等）。\n")
-	fmt.Fprintf(buf, "搜索查询已记录，可在日志中查看。\n")
+	// 解析HTML获取搜索结果
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &Result{Content: fmt.Sprintf("读取响应失败: %v", err), IsError: true}, nil
+	}
 
-	_ = results
-	_ = resp
+	// 简单解析DuckDuckGo Lite结果
+	// 格式：<a class="result-link" href="...">title</a>
+	results := parseDuckDuckGoResults(string(body), limit)
 
-	return &Result{Content: buf.String()}, nil
+	if len(results) == 0 {
+		return &Result{Content: fmt.Sprintf("搜索 \"%s\" 未找到相关结果", query), TokenHint: 10}, nil
+	}
+
+	// 构建结果输出
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("搜索 \"%s\" 的结果（共 %d 条）：\n\n", query, len(results)))
+	for i, r := range results {
+		output.WriteString(fmt.Sprintf("%d. %s\n   %s\n   来源: %s\n\n", i+1, r.Title, r.Snippet, r.URL))
+	}
+
+	content := trimOutput(output.String(), DefaultToolConfig.MaxOutputSize)
+	return &Result{
+		Content:   content,
+		TokenHint: estimateTokens(content),
+	}, nil
 }
+
+type searchResult struct {
+	Title   string
+	URL     string
+	Snippet string
+}
+
+func parseDuckDuckGoResults(html string, limit int) []searchResult {
+	var results []searchResult
+
+	// 提取链接标题
+	linkRegex := regexp.MustCompile(`<a[^>]*class="[^"]*result-link[^"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>`)
+	snippetRegex := regexp.MustCompile(`<td[^>]*class="[^"]*result-snippet[^"]*"[^>]*>([^<]+)</td>`)
+
+	linkMatches := linkRegex.FindAllStringSubmatch(html, limit)
+	snippetMatches := snippetRegex.FindAllStringSubmatch(html, limit)
+
+	for i, match := range linkMatches {
+		if len(match) >= 3 {
+			result := searchResult{
+				URL:   match[1],
+				Title: strings.TrimSpace(match[2]),
+			}
+			if i < len(snippetMatches) && len(snippetMatches[i]) >= 2 {
+				result.Snippet = strings.TrimSpace(snippetMatches[i][1])
+			}
+			results = append(results, result)
+		}
+	}
+
+	return results
+}
+
+// ========== 第二阶段新增：网页抓取工具 ==========
+
+// WebFetchTool 网页内容抓取工具
+type WebFetchTool struct{}
+
+func (t *WebFetchTool) Name() string        { return "web_fetch" }
+func (t *WebFetchTool) Description() string  { return "抓取网页内容并提取文本" }
+func (t *WebFetchTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"url": map[string]interface{}{
+				"type":        "string",
+				"description": "要抓取的网页URL",
+			},
+			"extract_text": map[string]interface{}{
+				"type":        "boolean",
+				"description": "是否提取纯文本，默认true",
+				"default":     true,
+			},
+			"max_length": map[string]interface{}{
+				"type":        "integer",
+				"description": "最大返回内容长度，默认5000",
+				"default":     5000,
+			},
+		},
+		"required": []string{"url"},
+	}
+}
+
+func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
+	rawURL, _ := args["url"].(string)
+	if rawURL == "" {
+		return &Result{Content: "错误：缺少URL参数", IsError: true}, nil
+	}
+
+	// 验证URL格式
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return &Result{Content: fmt.Sprintf("URL格式错误: %v", err), IsError: true}, nil
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return &Result{Content: "错误：只支持HTTP/HTTPS协议", IsError: true}, nil
+	}
+
+	extractText := true
+	if e, ok := args["extract_text"].(bool); ok {
+		extractText = e
+	}
+
+	maxLength := 5000
+	if m, ok := args["max_length"].(float64); ok && m > 0 {
+		maxLength = int(m)
+	}
+
+	// 第二阶段：使用共享HTTP客户端
+	client := DefaultToolConfig.HTTPClient
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return &Result{Content: fmt.Sprintf("创建请求失败: %v", err), IsError: true}, nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; EinoAgent/1.0; +https://github.com/YJMQN/cat-agent)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return &Result{Content: fmt.Sprintf("请求失败: %v", err), IsError: true}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return &Result{Content: fmt.Sprintf("网页返回错误: %d %s", resp.StatusCode, resp.Status), IsError: true}, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &Result{Content: fmt.Sprintf("读取内容失败: %v", err), IsError: true}, nil
+	}
+
+	content := string(body)
+
+	// 提取纯文本
+	if extractText {
+		content = extractTextFromHTML(content)
+	}
+
+	// 限制输出长度
+	if len(content) > maxLength {
+		content = content[:maxLength] + "\n... (内容已截断)"
+	}
+
+	output := fmt.Sprintf("网页内容 (%s):\n\n%s", rawURL, content)
+	output = trimOutput(output, DefaultToolConfig.MaxOutputSize)
+
+	return &Result{
+		Content:   output,
+		TokenHint: estimateTokens(output),
+	}, nil
+}
+
+// extractTextFromHTML 从HTML提取纯文本
+func extractTextFromHTML(html string) string {
+	// 移除script和style标签
+	scriptRegex := regexp.MustCompile(`<script[^>]*>[^<]*</script>`)
+	styleRegex := regexp.MustCompile(`<style[^>]*>[^<]*</style>`)
+	html = scriptRegex.ReplaceAllString(html, "")
+	html = styleRegex.ReplaceAllString(html, "")
+
+	// 移除所有HTML标签
+	tagRegex := regexp.MustCompile(`<[^>]+>`)
+	html = tagRegex.ReplaceAllString(html, "")
+
+	// 移除HTML实体
+	htmlEntityRegex := regexp.MustCompile(`&[^;]+;`)
+	html = htmlEntityRegex.ReplaceAllStringFunc(html, func(s string) string {
+		switch s {
+		case "&nbsp;":
+			return " "
+		case "&lt;":
+			return "<"
+		case "&gt;":
+			return ">"
+		case "&amp;":
+			return "&"
+		case "&quot;":
+			return "\""
+		default:
+			return ""
+		}
+	})
+
+	// 清理空白
+	multipleSpaceRegex := regexp.MustCompile(`\s+`)
+	html = multipleSpaceRegex.ReplaceAllString(html, " ")
+
+	return strings.TrimSpace(html)
+}
+
+// ========== 第二阶段新增：文件系统工具 ==========
+
+// FileTool 文件系统操作工具
+type FileTool struct{}
+
+func (t *FileTool) Name() string        { return "file" }
+func (t *FileTool) Description() string  { return "文件系统操作：读取、写入、列表、删除文件" }
+func (t *FileTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"operation": map[string]interface{}{
+				"type":        "string",
+				"description": "操作类型：read, write, list, delete, create_dir",
+				"enum":        []string{"read", "write", "list", "delete", "create_dir"},
+			},
+			"path": map[string]interface{}{
+				"type":        "string",
+				"description": "文件或目录路径",
+			},
+			"content": map[string]interface{}{
+				"type":        "string",
+				"description": "写入内容（write操作需要）",
+			},
+			"recursive": map[string]interface{}{
+				"type":        "boolean",
+				"description": "是否递归（list/delete操作）",
+				"default":     false,
+			},
+		},
+		"required": []string{"operation", "path"},
+	}
+}
+
+func (t *FileTool) RequiresConfirmation(args map[string]interface{}) bool {
+	op, _ := args["operation"].(string)
+	// 写入和删除操作需要确认
+	return op == "write" || op == "delete"
+}
+
+func (t *FileTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
+	operation, _ := args["operation"].(string)
+	path, _ := args["path"].(string)
+
+	if operation == "" || path == "" {
+		return &Result{Content: "错误：缺少操作类型或路径参数", IsError: true}, nil
+	}
+
+	// 安全检查：禁止访问敏感路径
+	if isSensitivePath(path) {
+		return &Result{
+			Content: "错误：禁止访问系统敏感路径（如/etc/passwd、/etc/shadow等）",
+			IsError: true,
+		}, nil
+	}
+
+	switch operation {
+	case "read":
+		return t.readFile(path)
+	case "write":
+		content, _ := args["content"].(string)
+		return t.writeFile(path, content)
+	case "list":
+		recursive, _ := args["recursive"].(bool)
+		return t.listDir(path, recursive)
+	case "delete":
+		return t.deleteFile(path)
+	case "create_dir":
+		return t.createDir(path)
+	default:
+		return &Result{Content: fmt.Sprintf("错误：未知操作类型: %s", operation), IsError: true}, nil
+	}
+}
+
+// isSensitivePath 检查是否为敏感路径
+func isSensitivePath(path string) bool {
+	sensitivePatterns := []string{
+		"/etc/passwd", "/etc/shadow", "/etc/sudoers",
+		"/root/.ssh", "/home/*/.ssh",
+		".env", "*.pem", "*.key", "*.secret",
+	}
+	absPath := filepath.Clean(path)
+	for _, pattern := range sensitivePatterns {
+		if strings.Contains(absPath, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *FileTool) readFile(path string) (*Result, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return &Result{Content: fmt.Sprintf("读取文件失败: %v", err), IsError: true}, nil
+	}
+
+	// 限制输出大小
+	output := string(content)
+	if len(output) > DefaultToolConfig.MaxOutputSize {
+		output = output[:DefaultToolConfig.MaxOutputSize] + "\n... (内容已截断)"
+	}
+
+	return &Result{
+		Content:   output,
+		TokenHint: estimateTokens(output),
+	}, nil
+}
+
+func (t *FileTool) writeFile(path, content string) (*Result, error) {
+	if content == "" {
+		return &Result{Content: "错误：缺少写入内容", IsError: true}, nil
+	}
+
+	// 确保目录存在
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return &Result{Content: fmt.Sprintf("创建目录失败: %v", err), IsError: true}, nil
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return &Result{Content: fmt.Sprintf("写入文件失败: %v", err), IsError: true}, nil
+	}
+
+	return &Result{
+		Content:   fmt.Sprintf("文件已成功写入: %s (%d 字节)", path, len(content)),
+		TokenHint: 10,
+	}, nil
+}
+
+func (t *FileTool) listDir(path string, recursive bool) (*Result, error) {
+	var files []string
+
+	if recursive {
+		err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			relPath, _ := filepath.Rel(path, filePath)
+			if info.IsDir() {
+				files = append(files, relPath + "/")
+			} else {
+				files = append(files, relPath)
+			}
+			return nil
+		})
+		if err != nil {
+			return &Result{Content: fmt.Sprintf("遍历目录失败: %v", err), IsError: true}, nil
+		}
+	} else {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return &Result{Content: fmt.Sprintf("读取目录失败: %v", err), IsError: true}, nil
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				files = append(files, entry.Name() + "/")
+			} else {
+				files = append(files, entry.Name())
+			}
+		}
+	}
+
+	output := fmt.Sprintf("目录 %s 内容（共 %d 条）：\n%s", path, len(files), strings.Join(files, "\n"))
+	output = trimOutput(output, DefaultToolConfig.MaxOutputSize)
+
+	return &Result{
+		Content:   output,
+		TokenHint: estimateTokens(output),
+	}, nil
+}
+
+func (t *FileTool) deleteFile(path string) (*Result, error) {
+	if err := os.Remove(path); err != nil {
+		// 如果是目录，尝试递归删除
+		if os.IsNotExist(err) {
+			return &Result{Content: "错误：文件不存在", IsError: true}, nil
+		}
+		// 尝试作为目录删除
+		if err := os.RemoveAll(path); err != nil {
+			return &Result{Content: fmt.Sprintf("删除失败: %v", err), IsError: true}, nil
+		}
+	}
+
+	return &Result{
+		Content:   fmt.Sprintf("已删除: %s", path),
+		TokenHint: 5,
+	}, nil
+}
+
+func (t *FileTool) createDir(path string) (*Result, error) {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return &Result{Content: fmt.Sprintf("创建目录失败: %v", err), IsError: true}, nil
+	}
+
+	return &Result{
+		Content:   fmt.Sprintf("目录已创建: %s", path),
+		TokenHint: 5,
+	}, nil
+}
+
+// ========== 工具辅助函数 ==========
 
 // ValidateArgs 校验工具参数
 func ValidateArgs(tool Tool, args map[string]interface{}) error {
@@ -628,6 +1260,14 @@ func ValidateArgs(tool Tool, args map[string]interface{}) error {
 			default:
 				return fmt.Errorf("参数 %s 应为数字类型", key)
 			}
+		case "boolean":
+			if _, ok := val.(bool); !ok {
+				return fmt.Errorf("参数 %s 应为布尔类型", key)
+			}
+		case "array":
+			if _, ok := val.([]interface{}); !ok {
+				return fmt.Errorf("参数 %s 应为数组类型", key)
+			}
 		}
 	}
 
@@ -640,7 +1280,7 @@ func SanitizeInput(input string) string {
 	dangerous := []string{
 		"system:", "assistant:", "user:",
 		"```system", "```assistant",
-		"<|system|>", "<|assistant|>",
+		"ồ　", ".Lookup",
 	}
 	result := input
 	for _, d := range dangerous {

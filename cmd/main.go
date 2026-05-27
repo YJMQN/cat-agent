@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"eino-agent/internal/api/handler"
 	"eino-agent/internal/api/middleware"
@@ -18,8 +20,11 @@ import (
 )
 
 func main() {
-	// 加载配置
-	cfg := config.Load()
+	// 加载配置 - 第一阶段安全加固: JWT密钥检查
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("配置加载失败: %v", err)
+	}
 
 	// 初始化数据库
 	db, err := repository.InitDB(cfg.DatabasePath)
@@ -39,21 +44,39 @@ func main() {
 	// 设置路由
 	r := setupRouter(h, cfg)
 
-	// 启动服务
+	// 第一阶段安全加固: 使用http.Server实现优雅关闭
 	addr := fmt.Sprintf(":%d", cfg.ServerPort)
-	log.Printf("Agent服务启动于 %s", addr)
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      r,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second, // 流式响应可能需要较长写入时间
+		IdleTimeout:  120 * time.Second,
+	}
 
+	// 启动服务
 	go func() {
-		if err := r.Run(addr); err != nil && err != http.ErrServerClosed {
+		log.Printf("Agent服务启动于 %s (环境: %s)", addr, cfg.Env)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("服务启动失败: %v", err)
 		}
 	}()
 
-	// 优雅关闭
+	// 第一阶段安全加固: 优雅关闭
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("服务正在关闭...")
+	log.Println("收到关闭信号，正在优雅关闭服务...")
+
+	// 给予30秒时间处理现有连接
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("服务强制关闭: %v", err)
+	} else {
+		log.Println("服务已优雅关闭")
+	}
 }
 
 func setupRouter(h *handler.Handlers, cfg *config.Config) *gin.Engine {
@@ -65,15 +88,23 @@ func setupRouter(h *handler.Handlers, cfg *config.Config) *gin.Engine {
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(middleware.CORS())
 
-	// 健康检查
+	// 第一阶段安全加固: 速率限制中间件
+	r.Use(middleware.RateLimit(cfg.RateLimitRequests, cfg.RateLimitBurst))
+
+	// 健康检查 (公开)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Agent 流式对话端点 (SSE)
-	r.POST("/api/chat", h.Chat.HandleChat)
-	r.GET("/api/chat/stream", h.Chat.HandleStream)
-	r.POST("/api/chat/tool/confirm", h.Chat.HandleToolConfirmation)
+	// 第一阶段安全加固: 对话端点添加认证保护
+	// 使用JWT认证中间件保护聊天端点
+	chatGroup := r.Group("/api/chat")
+	chatGroup.Use(middleware.JWTAuth(cfg.JWTSecret))
+	{
+		chatGroup.POST("", h.Chat.HandleChat)
+		chatGroup.GET("/stream", h.Chat.HandleStream)
+		chatGroup.POST("/tool/confirm", h.Chat.HandleToolConfirmation)
+	}
 
 	// 公开路由 (登录/注册)
 	public := r.Group("/api/auth")
@@ -114,26 +145,39 @@ func setupRouter(h *handler.Handlers, cfg *config.Config) *gin.Engine {
 
 		// 数据统计
 		admin.GET("/stats/overview", h.Admin.StatsOverview)
-		admin.GET("/stats/tokens", h.Admin.TokenUsage)
-		admin.GET("/stats/tools", h.Admin.ToolRanking)
+		admin.GET("/stats/tokens", h.Admin.TokenStats)
+		admin.GET("/stats/tools", h.Admin.ToolStats)
 
-		// 记忆管理
+		// 记忆库
 		admin.GET("/memories", h.Admin.ListMemories)
 		admin.GET("/memories/:id", h.Admin.GetMemory)
 		admin.PUT("/memories/:id", h.Admin.UpdateMemory)
 		admin.DELETE("/memories/:id", h.Admin.DeleteMemory)
 
-		// 用户管理
-		admin.GET("/users", h.Admin.ListUsers)
-		admin.PUT("/users/:id/role", h.Admin.UpdateUserRole)
+		// 用户管理 (管理员专属)
+		adminUsers := admin.Group("/users")
+		adminUsers.Use(middleware.AdminOnly())
+		{
+			adminUsers.GET("", h.Admin.ListUsers)
+			adminUsers.POST("", h.Admin.CreateUser)
+			adminUsers.GET("/:id", h.Admin.GetUser)
+			adminUsers.PUT("/:id", h.Admin.UpdateUser)
+			adminUsers.DELETE("/:id", h.Admin.DeleteUser)
+		}
 	}
 
-	// 管理前端静态文件
-	r.Static("/assets", "./web/dist/assets")
-	r.StaticFile("/", "./web/dist/index.html")
-	r.NoRoute(func(c *gin.Context) {
-		c.File("./web/dist/index.html")
-	})
+	// 多Agent协作编排API - 新增
+	orchestrate := r.Group("/api/orchestrate")
+	orchestrate.Use(middleware.JWTAuth(cfg.JWTSecret))
+	{
+		orchestrate.POST("/workflow", h.Orchestrate.CreateWorkflow)
+		orchestrate.GET("/workflow/:id", h.Orchestrate.GetWorkflow)
+		orchestrate.POST("/workflow/:id/execute", h.Orchestrate.ExecuteWorkflow)
+		orchestrate.GET("/workflow/:id/status", h.Orchestrate.GetWorkflowStatus)
+		orchestrate.POST("/workflow/:id/stop", h.Orchestrate.StopWorkflow)
+		orchestrate.GET("/workflows", h.Orchestrate.ListWorkflows)
+		orchestrate.DELETE("/workflow/:id", h.Orchestrate.DeleteWorkflow)
+	}
 
 	return r
 }

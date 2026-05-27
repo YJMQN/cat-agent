@@ -9,17 +9,33 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 // OpenAIProvider OpenAI兼容模型提供者
 type OpenAIProvider struct {
 	BaseURL string
 	APIKey  string
+	Client  *http.Client // 第二阶段新增：共享HTTP客户端
 }
 
 // NewOpenAIProvider 创建OpenAI提供者
 func NewOpenAIProvider(baseURL, apiKey string) *OpenAIProvider {
-	return &OpenAIProvider{BaseURL: baseURL, APIKey: apiKey}
+	return &OpenAIProvider{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+		Client:  DefaultHTTPClient(),
+	}
+}
+
+// NewOpenAIProviderWithClient 使用自定义HTTP客户端创建
+func NewOpenAIProviderWithClient(baseURL, apiKey string, client *http.Client) *OpenAIProvider {
+	return &OpenAIProvider{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+		Client:  client,
+	}
 }
 
 func (p *OpenAIProvider) ProviderName() string { return "openai" }
@@ -29,6 +45,7 @@ func (p *OpenAIProvider) Create(modelName string) (Model, error) {
 		baseURL:  p.BaseURL,
 		apiKey:   p.APIKey,
 		model:    modelName,
+		client:   p.Client,
 	}, nil
 }
 
@@ -37,6 +54,7 @@ type OpenAIModel struct {
 	baseURL string
 	apiKey  string
 	model   string
+	client  *http.Client
 }
 
 func (m *OpenAIModel) Name() string { return m.model }
@@ -52,10 +70,10 @@ type openaiRequest struct {
 }
 
 type openaiMessage struct {
-	Role       string              `json:"role"`
-	Content    string              `json:"content,omitempty"`
-	ToolCallID string              `json:"tool_call_id,omitempty"`
-	ToolCalls  []openaiToolCall    `json:"tool_calls,omitempty"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
 }
 
 type openaiTool struct {
@@ -124,7 +142,8 @@ func (m *OpenAIModel) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse
 		httpReq.Header.Set("Authorization", "Bearer "+m.apiKey)
 	}
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	// 第二阶段：使用共享HTTP客户端
+	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("请求模型API失败: %w", err)
 	}
@@ -182,7 +201,8 @@ func (m *OpenAIModel) StreamChat(ctx context.Context, req *ChatRequest) (<-chan 
 		httpReq.Header.Set("Authorization", "Bearer "+m.apiKey)
 	}
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	// 第二阶段：使用共享HTTP客户端
+	resp, err := m.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("请求模型API失败: %w", err)
 	}
@@ -198,6 +218,10 @@ func (m *OpenAIModel) StreamChat(ctx context.Context, req *ChatRequest) (<-chan 
 		defer close(chunks)
 		defer resp.Body.Close()
 
+		// 第二阶段修复：累积工具调用，避免切片传递Bug
+		var accumulatedToolCalls map[string]*ToolCall = make(map[string]*ToolCall)
+		var toolCallsMu sync.Mutex
+
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -206,7 +230,14 @@ func (m *OpenAIModel) StreamChat(ctx context.Context, req *ChatRequest) (<-chan 
 			}
 			data := strings.TrimPrefix(line, "data: ")
 			if data == "[DONE]" {
-				chunks <- StreamChunk{Done: true}
+				// 第二阶段修复：在流结束时发送累积的工具调用
+				toolCallsMu.Lock()
+				var finalToolCalls []ToolCall
+				for _, tc := range accumulatedToolCalls {
+					finalToolCalls = append(finalToolCalls, *tc)
+				}
+				toolCallsMu.Unlock()
+				chunks <- StreamChunk{Done: true, ToolCalls: finalToolCalls}
 				return
 			}
 
@@ -225,15 +256,26 @@ func (m *OpenAIModel) StreamChat(ctx context.Context, req *ChatRequest) (<-chan 
 				Done:  c.FinishReason != nil && *c.FinishReason == "stop",
 			}
 
+			// 第二阶段修复：正确累积工具调用参数
 			for _, tc := range c.Delta.ToolCalls {
-				sc.ToolCalls = append(sc.ToolCalls, ToolCall{
-					ID:   tc.ID,
-					Type: tc.Type,
-					Function: FunctionCall{
-						Name:      tc.Function.Name,
-						Arguments: tc.Function.Arguments,
-					},
-				})
+				toolCallsMu.Lock()
+				if existing, ok := accumulatedToolCalls[tc.ID]; ok {
+					// 累积参数（流式传输时参数是逐步发送的）
+					existing.Function.Arguments += tc.Function.Arguments
+					if tc.Function.Name != "" {
+						existing.Function.Name = tc.Function.Name
+					}
+				} else {
+					accumulatedToolCalls[tc.ID] = &ToolCall{
+						ID:   tc.ID,
+						Type: tc.Type,
+						Function: FunctionCall{
+							Name:      tc.Function.Name,
+							Arguments: tc.Function.Arguments,
+						},
+					}
+				}
+				toolCallsMu.Unlock()
 			}
 
 			if chunk.Usage != nil {
