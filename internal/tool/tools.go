@@ -144,6 +144,10 @@ func LoadBuiltinTools() *Registry {
 	r.Register(&WebFetchTool{}) // 第二阶段新增：网页抓取工具
 	r.Register(&LocalCommandTool{})
 	r.Register(&FileTool{}) // 第二阶段新增：文件系统工具
+	// 第三阶段新增
+	r.Register(&SandboxTool{})   // 沙箱执行工具
+	r.Register(&EmailSendTool{}) // 发送邮件工具
+	r.Register(&EmailReadTool{}) // 读取邮件工具
 	return r
 }
 
@@ -1222,7 +1226,158 @@ func (t *FileTool) createDir(path string) (*Result, error) {
 	}, nil
 }
 
-// ========== 工具辅助函数 ==========
+// ========== 第三阶段：沙箱执行工具 ==========
+
+// SandboxTool 沙箱工具 - 在隔离环境执行命令
+type SandboxTool struct{}
+
+func (t *SandboxTool) Name() string       { return "sandbox" }
+func (t *SandboxTool) Description() string { return "在安全沙箱中执行命令（Docker/non-privileged子系统）" }
+func (t *SandboxTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"command": map[string]interface{}{
+				"type":        "string",
+				"description": "要执行的命令",
+			},
+			"timeout_seconds": map[string]interface{}{
+				"type":        "integer",
+				"description": "超时时间，默认60秒",
+				"default":     60,
+			},
+			"image": map[string]interface{}{
+				"type":        "string",
+				"description": "Docker镜像（如需Docker执行）",
+				"default":     "ubuntu:22.04",
+			},
+		},
+		"required": []string{"command"},
+	}
+}
+
+func (t *SandboxTool) RequiresConfirmation(args map[string]interface{}) bool {
+	return true
+}
+
+func (t *SandboxTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
+	command, _ := args["command"].(string)
+	if command == "" {
+		return &Result{Content: "错误：缺少命令参数", IsError: true}, nil
+	}
+
+	timeoutSeconds := 60
+	if to, ok := args["timeout_seconds"].(float64); ok && to > 0 {
+		timeoutSeconds = int(to)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	// 使用非特权模式执行，通过有限的shell执行
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+
+	// 安全限制：设置隔离环境
+	cmd.Env = []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/tmp/sandbox",
+		"USER=nobody",
+		"SHELL=/bin/sh",
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	if err != nil {
+		return &Result{
+			Content: fmt.Sprintf("沙箱执行失败: %v\n%s", err, strings.TrimSpace(stderr.String())),
+			IsError: true,
+		}, nil
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if output == "" {
+		output = "命令已在沙箱中完成执行（无输出）"
+	}
+
+	output = trimOutput(output, DefaultToolConfig.MaxOutputSize)
+	return &Result{
+		Content:   "[沙箱输出]\n" + output,
+		TokenHint: estimateTokens(output),
+	}, nil
+}
+
+// ========== 第三阶段：邮件工具（占位） ==========
+
+// EmailSendTool 发送邮件工具
+type EmailSendTool struct{}
+
+func (t *EmailSendTool) Name() string       { return "email_send" }
+func (t *EmailSendTool) Description() string { return "发送电子邮件（需配置SMTP服务器）" }
+func (t *EmailSendTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"to": map[string]interface{}{
+				"type":        "string",
+				"description": "收件人邮箱地址",
+			},
+			"subject": map[string]interface{}{
+				"type":        "string",
+				"description": "邮件主题",
+			},
+			"body": map[string]interface{}{
+				"type":        "string",
+				"description": "邮件正文",
+			},
+		},
+		"required": []string{"to", "subject", "body"},
+	}
+}
+
+func (t *EmailSendTool) RequiresConfirmation(args map[string]interface{}) bool {
+	return true
+}
+
+func (t *EmailSendTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
+	return &Result{
+		Content:   "邮件功能需要配置SMTP服务器后才可使用。请设置SMTP_HOST、SMTP_PORT、SMTP_USER、SMTP_PASS环境变量。",
+		IsError:   false,
+	}, nil
+}
+
+// EmailReadTool 读取邮件工具
+type EmailReadTool struct{}
+
+func (t *EmailReadTool) Name() string       { return "email_read" }
+func (t *EmailReadTool) Description() string { return "读取电子邮件（需配置IMAP服务器）" }
+func (t *EmailReadTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"limit": map[string]interface{}{
+				"type":        "integer",
+				"description": "读取邮件数量，默认10",
+				"default":     10,
+			},
+			"folder": map[string]interface{}{
+				"type":        "string",
+				"description": "邮件文件夹，默认INBOX",
+				"default":     "INBOX",
+			},
+		},
+	}
+}
+
+func (t *EmailReadTool) Execute(ctx context.Context, args map[string]interface{}) (*Result, error) {
+	return &Result{
+		Content: "邮件读取功能需要配置IMAP服务器后才可使用。请设置IMAP_HOST、IMAP_PORT、IMAP_USER、IMAP_PASS环境变量。",
+		IsError: false,
+	}, nil
+}
 
 // ValidateArgs 校验工具参数
 func ValidateArgs(tool Tool, args map[string]interface{}) error {

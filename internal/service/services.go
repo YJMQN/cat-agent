@@ -14,6 +14,16 @@ type Services struct {
 	Chat       *ChatService
 	Admin      *AdminService
 	Orchestrate *OrchestrateService // 多Agent协作编排服务
+
+	// 第三阶段：智能能力增强
+	Memory      *MemoryService       // 智能记忆系统
+	CronScheduler *CronScheduler    // Cron调度器
+	PluginEngine *PluginEngine      // 动态插件引擎
+
+	// 第四阶段：体验优化与扩展
+	Export      *ExportService      // 对话导出
+	RAG         *RAGService         // RAG文档检索
+	TokenBudget *TokenBudgetService // Token预算监控
 }
 
 // NewServices 创建所有服务实例
@@ -33,6 +43,16 @@ func NewServices(repo *repository.Repository, cfg *config.Config) *Services {
 		Agent:       NewAgentService(repo, openaiProvider, localProvider, toolRegistry),
 		Chat:        chatService,
 		Admin:       NewAdminService(repo),
-		Orchestrate: NewOrchestrateService(repo, chatService, cfg), // 多Agent协作编排
+		Orchestrate: NewOrchestrateService(repo, chatService, cfg),
+
+		// 第三阶段
+		Memory:      NewMemoryService(repo, cfg),
+		CronScheduler: NewCronScheduler(repo, chatService, cfg),
+		PluginEngine: NewPluginEngine(repo, cfg),
+
+		// 第四阶段
+		Export:      NewExportService(repo, cfg),
+		RAG:         NewRAGService(repo, cfg),
+		TokenBudget: NewTokenBudgetService(repo),
 	}
 }

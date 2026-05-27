@@ -41,6 +41,12 @@ func main() {
 	// 初始化处理器
 	h := handler.NewHandlers(svc)
 
+	// 第三阶段：启动Cron调度器
+	if cfg.CronEnabled {
+		svc.CronScheduler.Start(context.Background())
+		log.Println("Cron调度器已启动")
+	}
+
 	// 设置路由
 	r := setupRouter(h, cfg)
 
@@ -164,6 +170,9 @@ func setupRouter(h *handler.Handlers, cfg *config.Config) *gin.Engine {
 			adminUsers.PUT("/:id", h.Admin.UpdateUser)
 			adminUsers.DELETE("/:id", h.Admin.DeleteUser)
 		}
+
+		// 第三阶段：审计日志
+		admin.GET("/audit-logs", h.Admin.ListAuditLogs)
 	}
 
 	// 多Agent协作编排API - 新增
@@ -177,6 +186,13 @@ func setupRouter(h *handler.Handlers, cfg *config.Config) *gin.Engine {
 		orchestrate.POST("/workflow/:id/stop", h.Orchestrate.StopWorkflow)
 		orchestrate.GET("/workflows", h.Orchestrate.ListWorkflows)
 		orchestrate.DELETE("/workflow/:id", h.Orchestrate.DeleteWorkflow)
+	}
+
+	// 第三/四阶段：注册增强路由（智能记忆、Cron、插件、导出、RAG等）
+	enhanced := r.Group("/api/v2")
+	enhanced.Use(middleware.JWTAuth(cfg.JWTSecret))
+	{
+		handler.RegisterEnhancedRoutes(enhanced, h)
 	}
 
 	return r

@@ -10,6 +10,17 @@ type Handlers struct {
 	Chat        *ChatHandler
 	Admin        *AdminHandler
 	Orchestrate *OrchestrateHandler // 多Agent协作编排处理器
+
+	// 第三阶段：智能能力增强
+	Memory    *MemoryHandler
+	Cron      *CronHandler
+	Plugin    *PluginHandler
+	WebSocket *WebSocketHandler
+
+	// 第四阶段：体验优化与扩展
+	Export *ExportHandler
+	RAG    *RAGHandler
+	Budget *TokenBudgetHandler
 }
 
 // NewHandlers 创建所有处理器
@@ -18,6 +29,17 @@ func NewHandlers(svc *service.Services) *Handlers {
 		Auth:        NewAuthHandler(svc.Auth),
 		Chat:        NewChatHandler(svc.Chat),
 		Admin:       NewAdminHandler(svc.Admin, svc.Agent),
-		Orchestrate: NewOrchestrateHandler(svc.Orchestrate), // 多Agent协作编排
+		Orchestrate: NewOrchestrateHandler(svc.Orchestrate),
+
+		// 第三阶段
+		Memory:    NewMemoryHandler(svc.Memory),
+		Cron:      NewCronHandler(svc.CronScheduler),
+		Plugin:    NewPluginHandler(svc.PluginEngine),
+		WebSocket: NewWebSocketHandler(),
+
+		// 第四阶段
+		Export: NewExportHandler(svc.Export),
+		RAG:    NewRAGHandler(svc.RAG),
+		Budget: NewTokenBudgetHandler(svc.TokenBudget),
 	}
 }

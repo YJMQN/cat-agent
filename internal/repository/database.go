@@ -41,6 +41,16 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		&domain.Workflow{},
 		&domain.WorkflowExecution{},
 		&domain.StepExecution{},
+		// 第三阶段：智能能力增强
+		&domain.MemoryItem{},
+		&domain.CronJob{},
+		&domain.CronLog{},
+		&domain.Plugin{},
+		// 第四阶段：体验优化
+		&domain.Document{},
+		&domain.DocumentChunk{},
+		&domain.ExportRecord{},
+		&domain.TokenBudget{},
 	); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}

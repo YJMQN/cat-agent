@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"eino-agent/internal/domain"
 	"eino-agent/internal/repository"
@@ -17,6 +18,38 @@ type AdminService struct {
 // NewAdminService 创建管理服务
 func NewAdminService(repo *repository.Repository) *AdminService {
 	return &AdminService{repo: repo}
+}
+
+// ========== 审计日志 ==========
+
+// Audit 记录审计日志
+func (s *AdminService) Audit(userID uint, action, resource, detail, ip string) error {
+	log := &domain.AuditLog{
+		UserID:    userID,
+		Action:    action,
+		Resource:  resource,
+		Detail:    truncateString(detail, 500),
+		IP:        ip,
+		CreatedAt: time.Now(),
+	}
+	return s.repo.Audit.Create(log)
+}
+
+// ListAuditLogs 获取审计日志
+func (s *AdminService) ListAuditLogs(limit int) ([]domain.AuditLog, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	logs, _, err := s.repo.Audit.List(1, limit)
+	return logs, err
+}
+
+func truncateString(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 // ========== Agent管理 ==========

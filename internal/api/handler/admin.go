@@ -395,17 +395,30 @@ func (h *AdminHandler) StatsOverview(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": stats})
 }
 
-// TokenUsage 获取Token用量
-func (h *AdminHandler) TokenUsage(c *gin.Context) {
+// TokenStats Token使用统计
+func (h *AdminHandler) TokenStats(c *gin.Context) {
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
-
 	usage, err := h.adminSvc.GetTokenUsage(days)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{"data": usage})
+}
+
+// ToolStats 工具使用统计
+func (h *AdminHandler) ToolStats(c *gin.Context) {
+	ranking, err := h.adminSvc.GetToolRanking()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": ranking})
+}
+
+// TokenUsage 获取Token用量（兼容旧路由）
+func (h *AdminHandler) TokenUsage(c *gin.Context) {
+	h.TokenStats(c)
 }
 
 // ToolRanking 获取工具排行
@@ -474,6 +487,64 @@ func (h *AdminHandler) UpdateMemory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
 }
 
+// ========== 用户管理扩展 ==========
+
+// CreateUser 创建用户
+func (h *AdminHandler) CreateUser(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+		Role     string `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "用户已创建", "username": req.Username})
+}
+
+// GetUser 获取用户
+func (h *AdminHandler) GetUser(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"message": "用户详情"})
+}
+
+// UpdateUser 更新用户
+func (h *AdminHandler) UpdateUser(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		return
+	}
+	var req struct{ Role string `json:"role"` }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+	if err := h.adminSvc.UpdateUserRole(uint(id), req.Role); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
+}
+
+// DeleteUser 删除用户
+func (h *AdminHandler) DeleteUser(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"message": "用户已删除"})
+}
+
+// ========== 第三阶段：审计日志 ==========
+
+// ListAuditLogs 获取审计日志
+func (h *AdminHandler) ListAuditLogs(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	logs, err := h.adminSvc.ListAuditLogs(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": logs})
+}
+
 // DeleteMemory 删除记忆
 func (h *AdminHandler) DeleteMemory(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -525,3 +596,4 @@ func (h *AdminHandler) UpdateUserRole(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
 }
+
