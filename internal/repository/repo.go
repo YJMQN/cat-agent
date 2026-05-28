@@ -28,11 +28,33 @@ type Repository struct {
 	ExportRecord  ExportRecordRepository
 	TokenBudget   TokenBudgetRepository
 	ModelConfig   GlobalModelConfigRepository
-	
+
 	// 多Agent协作编排仓储
-	Workflow         WorkflowRepository
+	Workflow          WorkflowRepository
 	WorkflowExecution WorkflowExecutionRepository
-	StepExecution    StepExecutionRepository
+	StepExecution     StepExecutionRepository
+
+	// ========== 功能1-5：新增仓储 ==========
+	// 功能1：用户画像系统
+	UserProfile        UserProfileRepository
+	ProfileDimension   ProfileDimensionRepository
+	OnboardingQuestion OnboardingQuestionRepository
+	ProfileUpdate      ProfileUpdateRepository
+	// 功能2：情景记忆
+	EpisodicMemory EpisodicMemoryRepository
+	// 功能3：反馈系统
+	UserFeedback     UserFeedbackRepository
+	ImplicitFeedback ImplicitFeedbackRepository
+	FeedbackAnalysis FeedbackAnalysisRepository
+	// 功能4：Agent评估
+	AgentMetrics     AgentMetricsRepository
+	EvaluationResult EvaluationResultRepository
+	DimensionalScore DimensionalScoreRepository
+	// 功能5：可观测性
+	ExecutionTrace ExecutionTraceRepository
+	TraceSpan      TraceSpanRepository
+	ToolMetrics    ToolMetricsRepository
+	ModelMetrics   ModelMetricsRepository
 
 	db *gorm.DB
 }
@@ -57,11 +79,28 @@ func New(db *gorm.DB) *Repository {
 		DocumentChunk: &documentChunkRepo{db: db},
 		ExportRecord:  &exportRecordRepo{db: db},
 		TokenBudget:   &tokenBudgetRepo{db: db},
-		ModelConfig:    &modelConfigRepo{db: db},
+		ModelConfig:   &modelConfigRepo{db: db},
 
 		Workflow:          &workflowRepo{db: db},
 		WorkflowExecution: &workflowExecutionRepo{db: db},
 		StepExecution:     &stepExecutionRepo{db: db},
+
+		// ========== 功能1-5：初始化新仓储 ==========
+		UserProfile:        &userProfileRepo{db: db},
+		ProfileDimension:   &profileDimensionRepo{db: db},
+		OnboardingQuestion: &onboardingQuestionRepo{db: db},
+		ProfileUpdate:      &profileUpdateRepo{db: db},
+		EpisodicMemory:     &episodicMemoryRepo{db: db},
+		UserFeedback:       &userFeedbackRepo{db: db},
+		ImplicitFeedback:   &implicitFeedbackRepo{db: db},
+		FeedbackAnalysis:   &feedbackAnalysisRepo{db: db},
+		AgentMetrics:       &agentMetricsRepo{db: db},
+		EvaluationResult:   &evaluationResultRepo{db: db},
+		DimensionalScore:   &dimensionalScoreRepo{db: db},
+		ExecutionTrace:     &executionTraceRepo{db: db},
+		TraceSpan:          &traceSpanRepo{db: db},
+		ToolMetrics:        &toolMetricsRepo{db: db},
+		ModelMetrics:       &modelMetricsRepo{db: db},
 
 		db: db,
 	}
@@ -248,38 +287,90 @@ type StepExecutionRepository interface {
 // ========== 原有接口实现 ==========
 
 type userRepo struct{ db *gorm.DB }
-func (r *userRepo) Create(user *domain.User) error                       { return r.db.Create(user).Error }
-func (r *userRepo) GetByID(id uint) (*domain.User, error)                { var u domain.User; err := r.db.First(&u, id).Error; return &u, err }
-func (r *userRepo) GetByUsername(username string) (*domain.User, error)  { var u domain.User; err := r.db.Where("username = ?", username).First(&u).Error; return &u, err }
-func (r *userRepo) List() ([]domain.User, error)                         { var users []domain.User; err := r.db.Find(&users).Error; return users, err }
-func (r *userRepo) UpdateRole(id uint, role string) error                { return r.db.Model(&domain.User{}).Where("id = ?", id).Update("role", role).Error }
+
+func (r *userRepo) Create(user *domain.User) error { return r.db.Create(user).Error }
+func (r *userRepo) GetByID(id uint) (*domain.User, error) {
+	var u domain.User
+	err := r.db.First(&u, id).Error
+	return &u, err
+}
+func (r *userRepo) GetByUsername(username string) (*domain.User, error) {
+	var u domain.User
+	err := r.db.Where("username = ?", username).First(&u).Error
+	return &u, err
+}
+func (r *userRepo) List() ([]domain.User, error) {
+	var users []domain.User
+	err := r.db.Find(&users).Error
+	return users, err
+}
+func (r *userRepo) UpdateRole(id uint, role string) error {
+	return r.db.Model(&domain.User{}).Where("id = ?", id).Update("role", role).Error
+}
 
 type agentRepo struct{ db *gorm.DB }
+
 func (r *agentRepo) Create(agent *domain.AgentConfig) error { return r.db.Create(agent).Error }
-func (r *agentRepo) GetByID(id uint) (*domain.AgentConfig, error) { var a domain.AgentConfig; err := r.db.First(&a, id).Error; return &a, err }
-func (r *agentRepo) List() ([]domain.AgentConfig, error) { var agents []domain.AgentConfig; err := r.db.Find(&agents).Error; return agents, err }
+func (r *agentRepo) GetByID(id uint) (*domain.AgentConfig, error) {
+	var a domain.AgentConfig
+	err := r.db.First(&a, id).Error
+	return &a, err
+}
+func (r *agentRepo) List() ([]domain.AgentConfig, error) {
+	var agents []domain.AgentConfig
+	err := r.db.Find(&agents).Error
+	return agents, err
+}
 func (r *agentRepo) Update(agent *domain.AgentConfig) error { return r.db.Save(agent).Error }
-func (r *agentRepo) Delete(id uint) error { return r.db.Delete(&domain.AgentConfig{}, id).Error }
+func (r *agentRepo) Delete(id uint) error                   { return r.db.Delete(&domain.AgentConfig{}, id).Error }
 
 type toolRepo struct{ db *gorm.DB }
+
 func (r *toolRepo) Create(tool *domain.Tool) error { return r.db.Create(tool).Error }
-func (r *toolRepo) GetByID(id uint) (*domain.Tool, error) { var t domain.Tool; err := r.db.First(&t, id).Error; return &t, err }
-func (r *toolRepo) GetByName(name string) (*domain.Tool, error) { var t domain.Tool; err := r.db.Where("name = ?", name).First(&t).Error; return &t, err }
-func (r *toolRepo) List() ([]domain.Tool, error) { var tools []domain.Tool; err := r.db.Find(&tools).Error; return tools, err }
-func (r *toolRepo) ListEnabled() ([]domain.Tool, error) { var tools []domain.Tool; err := r.db.Where("enabled = ?", true).Find(&tools).Error; return tools, err }
+func (r *toolRepo) GetByID(id uint) (*domain.Tool, error) {
+	var t domain.Tool
+	err := r.db.First(&t, id).Error
+	return &t, err
+}
+func (r *toolRepo) GetByName(name string) (*domain.Tool, error) {
+	var t domain.Tool
+	err := r.db.Where("name = ?", name).First(&t).Error
+	return &t, err
+}
+func (r *toolRepo) List() ([]domain.Tool, error) {
+	var tools []domain.Tool
+	err := r.db.Find(&tools).Error
+	return tools, err
+}
+func (r *toolRepo) ListEnabled() ([]domain.Tool, error) {
+	var tools []domain.Tool
+	err := r.db.Where("enabled = ?", true).Find(&tools).Error
+	return tools, err
+}
 func (r *toolRepo) Update(tool *domain.Tool) error { return r.db.Save(tool).Error }
-func (r *toolRepo) Delete(id uint) error { return r.db.Delete(&domain.Tool{}, id).Error }
+func (r *toolRepo) Delete(id uint) error           { return r.db.Delete(&domain.Tool{}, id).Error }
 
 type sessionRepo struct{ db *gorm.DB }
+
 func (r *sessionRepo) Create(s *domain.Session) error { return r.db.Create(s).Error }
-func (r *sessionRepo) GetByID(id uint) (*domain.Session, error) { var s domain.Session; err := r.db.First(&s, id).Error; return &s, err }
-func (r *sessionRepo) GetByUUID(uuid string) (*domain.Session, error) { var s domain.Session; err := r.db.Where("uuid = ?", uuid).First(&s).Error; return &s, err }
-func (r *sessionRepo) List(page, size int) ([]domain.Session, int64, error) { 
+func (r *sessionRepo) GetByID(id uint) (*domain.Session, error) {
+	var s domain.Session
+	err := r.db.First(&s, id).Error
+	return &s, err
+}
+func (r *sessionRepo) GetByUUID(uuid string) (*domain.Session, error) {
+	var s domain.Session
+	err := r.db.Where("uuid = ?", uuid).First(&s).Error
+	return &s, err
+}
+func (r *sessionRepo) List(page, size int) ([]domain.Session, int64, error) {
 	var sessions []domain.Session
 	var total int64
 	r.db.Model(&domain.Session{}).Count(&total)
 	offset := (page - 1) * size
-	if offset < 0 { offset = 0 }
+	if offset < 0 {
+		offset = 0
+	}
 	err := r.db.Order("created_at DESC").Offset(offset).Limit(size).Find(&sessions).Error
 	return sessions, total, err
 }
@@ -289,10 +380,15 @@ func (r *sessionRepo) ListByUser(userID uint) ([]domain.Session, error) {
 	return sessions, err
 }
 func (r *sessionRepo) Update(s *domain.Session) error { return r.db.Save(s).Error }
-func (r *sessionRepo) Delete(id uint) error { return r.db.Delete(&domain.Session{}, id).Error }
-func (r *sessionRepo) GetActiveCount() int { var count int64; r.db.Model(&domain.Session{}).Where("status = ?", "active").Count(&count); return int(count) }
+func (r *sessionRepo) Delete(id uint) error           { return r.db.Delete(&domain.Session{}, id).Error }
+func (r *sessionRepo) GetActiveCount() int {
+	var count int64
+	r.db.Model(&domain.Session{}).Where("status = ?", "active").Count(&count)
+	return int(count)
+}
 
 type messageRepo struct{ db *gorm.DB }
+
 func (r *messageRepo) Create(msg *domain.Message) error { return r.db.Create(msg).Error }
 func (r *messageRepo) GetBySession(sessionID uint, limit int) ([]domain.Message, error) {
 	var msgs []domain.Message
@@ -306,8 +402,13 @@ func (r *messageRepo) CountBySession(sessionID uint) int64 {
 }
 
 type memoryRepo struct{ db *gorm.DB }
+
 func (r *memoryRepo) Create(m *domain.Memory) error { return r.db.Create(m).Error }
-func (r *memoryRepo) GetByID(id uint) (*domain.Memory, error) { var m domain.Memory; err := r.db.First(&m, id).Error; return &m, err }
+func (r *memoryRepo) GetByID(id uint) (*domain.Memory, error) {
+	var m domain.Memory
+	err := r.db.First(&m, id).Error
+	return &m, err
+}
 func (r *memoryRepo) GetByUser(userID uint) ([]domain.Memory, error) {
 	var mems []domain.Memory
 	err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&mems).Error
@@ -322,7 +423,7 @@ func (r *memoryRepo) GetByUserAndCategory(userID, category string) ([]domain.Mem
 	return nil, nil
 }
 func (r *memoryRepo) Update(m *domain.Memory) error { return r.db.Save(m).Error }
-func (r *memoryRepo) Delete(id uint) error { return r.db.Delete(&domain.Memory{}, id).Error }
+func (r *memoryRepo) Delete(id uint) error          { return r.db.Delete(&domain.Memory{}, id).Error }
 func (r *memoryRepo) Search(userID uint, keyword string) ([]domain.Memory, error) {
 	var mems []domain.Memory
 	err := r.db.Where("user_id = ? AND content LIKE ?", userID, "%"+keyword+"%").Find(&mems).Error
@@ -330,18 +431,22 @@ func (r *memoryRepo) Search(userID uint, keyword string) ([]domain.Memory, error
 }
 
 type auditRepo struct{ db *gorm.DB }
+
 func (r *auditRepo) Create(log *domain.AuditLog) error { return r.db.Create(log).Error }
 func (r *auditRepo) List(page, size int) ([]domain.AuditLog, int64, error) {
 	var logs []domain.AuditLog
 	var total int64
 	r.db.Model(&domain.AuditLog{}).Count(&total)
 	offset := (page - 1) * size
-	if offset < 0 { offset = 0 }
+	if offset < 0 {
+		offset = 0
+	}
 	err := r.db.Order("created_at DESC").Offset(offset).Limit(size).Find(&logs).Error
 	return logs, total, err
 }
 
 type statsRepo struct{ db *gorm.DB }
+
 func (r *statsRepo) Overview() (*domain.AdminStats, error) {
 	var totalSessions, totalMessages, totalUsers int64
 	r.db.Model(&domain.Session{}).Count(&totalSessions)
@@ -365,6 +470,7 @@ func (r *statsRepo) ToolRanking() ([]map[string]interface{}, error) {
 // ========== 第三/四阶段新增实现 ==========
 
 type memoryItemRepo struct{ db *gorm.DB }
+
 func (r *memoryItemRepo) Create(m *domain.MemoryItem) error { return r.db.Create(m).Error }
 func (r *memoryItemRepo) Search(userID uint, query string, limit int) ([]domain.MemoryItem, error) {
 	var items []domain.MemoryItem
@@ -376,54 +482,108 @@ func (r *memoryItemRepo) Search(userID uint, query string, limit int) ([]domain.
 func (r *memoryItemRepo) Delete(id uint) error { return r.db.Delete(&domain.MemoryItem{}, id).Error }
 
 type cronJobRepo struct{ db *gorm.DB }
+
 func (r *cronJobRepo) Create(j *domain.CronJob) error { return r.db.Create(j).Error }
 func (r *cronJobRepo) Update(j *domain.CronJob) error { return r.db.Save(j).Error }
-func (r *cronJobRepo) GetByID(id uint) (*domain.CronJob, error) { var j domain.CronJob; err := r.db.First(&j, id).Error; return &j, err }
-func (r *cronJobRepo) ListActive() ([]domain.CronJob, error) { var jobs []domain.CronJob; err := r.db.Where("status = ?", "active").Find(&jobs).Error; return jobs, err }
-func (r *cronJobRepo) ListByUser(userID uint) ([]domain.CronJob, error) { var jobs []domain.CronJob; err := r.db.Where("user_id = ?", userID).Find(&jobs).Error; return jobs, err }
+func (r *cronJobRepo) GetByID(id uint) (*domain.CronJob, error) {
+	var j domain.CronJob
+	err := r.db.First(&j, id).Error
+	return &j, err
+}
+func (r *cronJobRepo) ListActive() ([]domain.CronJob, error) {
+	var jobs []domain.CronJob
+	err := r.db.Where("status = ?", "active").Find(&jobs).Error
+	return jobs, err
+}
+func (r *cronJobRepo) ListByUser(userID uint) ([]domain.CronJob, error) {
+	var jobs []domain.CronJob
+	err := r.db.Where("user_id = ?", userID).Find(&jobs).Error
+	return jobs, err
+}
 func (r *cronJobRepo) Delete(id uint) error { return r.db.Delete(&domain.CronJob{}, id).Error }
 
 type cronLogRepo struct{ db *gorm.DB }
+
 func (r *cronLogRepo) Create(l *domain.CronLog) error { return r.db.Create(l).Error }
 func (r *cronLogRepo) Update(l *domain.CronLog) error { return r.db.Save(l).Error }
-func (r *cronLogRepo) ListByJob(jobID uint, limit int) ([]domain.CronLog, error) { var logs []domain.CronLog; err := r.db.Where("job_id = ?", jobID).Order("run_at DESC").Limit(limit).Find(&logs).Error; return logs, err }
+func (r *cronLogRepo) ListByJob(jobID uint, limit int) ([]domain.CronLog, error) {
+	var logs []domain.CronLog
+	err := r.db.Where("job_id = ?", jobID).Order("run_at DESC").Limit(limit).Find(&logs).Error
+	return logs, err
+}
 
 type pluginRepo struct{ db *gorm.DB }
+
 func (r *pluginRepo) Create(p *domain.Plugin) error { return r.db.Create(p).Error }
-func (r *pluginRepo) GetByID(id uint) (*domain.Plugin, error) { var p domain.Plugin; err := r.db.First(&p, id).Error; return &p, err }
-func (r *pluginRepo) ListEnabled() ([]domain.Plugin, error) { var plugins []domain.Plugin; err := r.db.Where("enabled = ?", true).Find(&plugins).Error; return plugins, err }
-func (r *pluginRepo) ListByUser(userID uint) ([]domain.Plugin, error) { var plugins []domain.Plugin; err := r.db.Where("created_by = ?", userID).Find(&plugins).Error; return plugins, err }
+func (r *pluginRepo) GetByID(id uint) (*domain.Plugin, error) {
+	var p domain.Plugin
+	err := r.db.First(&p, id).Error
+	return &p, err
+}
+func (r *pluginRepo) ListEnabled() ([]domain.Plugin, error) {
+	var plugins []domain.Plugin
+	err := r.db.Where("enabled = ?", true).Find(&plugins).Error
+	return plugins, err
+}
+func (r *pluginRepo) ListByUser(userID uint) ([]domain.Plugin, error) {
+	var plugins []domain.Plugin
+	err := r.db.Where("created_by = ?", userID).Find(&plugins).Error
+	return plugins, err
+}
 func (r *pluginRepo) Update(p *domain.Plugin) error { return r.db.Save(p).Error }
-func (r *pluginRepo) Delete(id uint) error { return r.db.Delete(&domain.Plugin{}, id).Error }
+func (r *pluginRepo) Delete(id uint) error          { return r.db.Delete(&domain.Plugin{}, id).Error }
 
 type documentRepo struct{ db *gorm.DB }
+
 func (r *documentRepo) Create(d *domain.Document) error { return r.db.Create(d).Error }
-func (r *documentRepo) GetByID(id uint) (*domain.Document, error) { var d domain.Document; err := r.db.First(&d, id).Error; return &d, err }
-func (r *documentRepo) ListByUser(userID uint) ([]domain.Document, error) { var docs []domain.Document; err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&docs).Error; return docs, err }
+func (r *documentRepo) GetByID(id uint) (*domain.Document, error) {
+	var d domain.Document
+	err := r.db.First(&d, id).Error
+	return &d, err
+}
+func (r *documentRepo) ListByUser(userID uint) ([]domain.Document, error) {
+	var docs []domain.Document
+	err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&docs).Error
+	return docs, err
+}
 func (r *documentRepo) Update(d *domain.Document) error { return r.db.Save(d).Error }
-func (r *documentRepo) Delete(id uint) error { return r.db.Delete(&domain.Document{}, id).Error }
+func (r *documentRepo) Delete(id uint) error            { return r.db.Delete(&domain.Document{}, id).Error }
 
 type documentChunkRepo struct{ db *gorm.DB }
+
 func (r *documentChunkRepo) Create(dc *domain.DocumentChunk) error { return r.db.Create(dc).Error }
 func (r *documentChunkRepo) SearchByKeyword(userID uint, query string, limit int) []domain.DocumentChunk {
 	var chunks []domain.DocumentChunk
 	r.db.Where("user_id = ? AND content LIKE ?", userID, "%"+query+"%").Limit(limit).Find(&chunks)
 	return chunks
 }
-func (r *documentChunkRepo) DeleteByDocument(docID uint) error { return r.db.Where("document_id = ?", docID).Delete(&domain.DocumentChunk{}).Error }
+func (r *documentChunkRepo) DeleteByDocument(docID uint) error {
+	return r.db.Where("document_id = ?", docID).Delete(&domain.DocumentChunk{}).Error
+}
 
 type exportRecordRepo struct{ db *gorm.DB }
+
 func (r *exportRecordRepo) Create(e *domain.ExportRecord) error { return r.db.Create(e).Error }
-func (r *exportRecordRepo) ListByUser(userID uint) ([]domain.ExportRecord, error) { var records []domain.ExportRecord; err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&records).Error; return records, err }
+func (r *exportRecordRepo) ListByUser(userID uint) ([]domain.ExportRecord, error) {
+	var records []domain.ExportRecord
+	err := r.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&records).Error
+	return records, err
+}
 
 type tokenBudgetRepo struct{ db *gorm.DB }
+
 func (r *tokenBudgetRepo) Create(b *domain.TokenBudget) error { return r.db.Create(b).Error }
-func (r *tokenBudgetRepo) GetByUser(userID uint) (*domain.TokenBudget, error) { var b domain.TokenBudget; err := r.db.Where("user_id = ?", userID).First(&b).Error; return &b, err }
+func (r *tokenBudgetRepo) GetByUser(userID uint) (*domain.TokenBudget, error) {
+	var b domain.TokenBudget
+	err := r.db.Where("user_id = ?", userID).First(&b).Error
+	return &b, err
+}
 func (r *tokenBudgetRepo) Update(b *domain.TokenBudget) error { return r.db.Save(b).Error }
 
 // ========== GlobalModelConfig Repo ==========
 
 type modelConfigRepo struct{ db *gorm.DB }
+
 func (r *modelConfigRepo) List() ([]domain.GlobalModelConfig, error) {
 	var cfgs []domain.GlobalModelConfig
 	err := r.db.Find(&cfgs).Error
@@ -441,27 +601,54 @@ func (r *modelConfigRepo) GetDefault() (*domain.GlobalModelConfig, error) {
 }
 func (r *modelConfigRepo) Create(cfg *domain.GlobalModelConfig) error { return r.db.Create(cfg).Error }
 func (r *modelConfigRepo) Update(cfg *domain.GlobalModelConfig) error { return r.db.Save(cfg).Error }
-func (r *modelConfigRepo) Delete(id uint) error { return r.db.Delete(&domain.GlobalModelConfig{}, id).Error }
+func (r *modelConfigRepo) Delete(id uint) error {
+	return r.db.Delete(&domain.GlobalModelConfig{}, id).Error
+}
 
 // ========== 多Agent协作编排实现 ==========
 
 type workflowRepo struct{ db *gorm.DB }
+
 func (r *workflowRepo) Create(w *domain.Workflow) error { return r.db.Create(w).Error }
-func (r *workflowRepo) GetByID(id uint) (*domain.Workflow, error) { var w domain.Workflow; err := r.db.First(&w, id).Error; return &w, err }
-func (r *workflowRepo) List(userID uint) ([]domain.Workflow, error) { var ws []domain.Workflow; err := r.db.Where("user_id = ?", userID).Find(&ws).Error; return ws, err }
+func (r *workflowRepo) GetByID(id uint) (*domain.Workflow, error) {
+	var w domain.Workflow
+	err := r.db.First(&w, id).Error
+	return &w, err
+}
+func (r *workflowRepo) List(userID uint) ([]domain.Workflow, error) {
+	var ws []domain.Workflow
+	err := r.db.Where("user_id = ?", userID).Find(&ws).Error
+	return ws, err
+}
 func (r *workflowRepo) Update(w *domain.Workflow) error { return r.db.Save(w).Error }
-func (r *workflowRepo) Delete(id uint) error { return r.db.Delete(&domain.Workflow{}, id).Error }
+func (r *workflowRepo) Delete(id uint) error            { return r.db.Delete(&domain.Workflow{}, id).Error }
 
 type workflowExecutionRepo struct{ db *gorm.DB }
-func (r *workflowExecutionRepo) Create(e *domain.WorkflowExecution) error { return r.db.Create(e).Error }
-func (r *workflowExecutionRepo) GetByID(id uint) (*domain.WorkflowExecution, error) { var e domain.WorkflowExecution; err := r.db.First(&e, id).Error; return &e, err }
-func (r *workflowExecutionRepo) GetByWorkflowID(workflowID uint) ([]domain.WorkflowExecution, error) { var execs []domain.WorkflowExecution; err := r.db.Where("workflow_id = ?", workflowID).Find(&execs).Error; return execs, err }
+
+func (r *workflowExecutionRepo) Create(e *domain.WorkflowExecution) error {
+	return r.db.Create(e).Error
+}
+func (r *workflowExecutionRepo) GetByID(id uint) (*domain.WorkflowExecution, error) {
+	var e domain.WorkflowExecution
+	err := r.db.First(&e, id).Error
+	return &e, err
+}
+func (r *workflowExecutionRepo) GetByWorkflowID(workflowID uint) ([]domain.WorkflowExecution, error) {
+	var execs []domain.WorkflowExecution
+	err := r.db.Where("workflow_id = ?", workflowID).Find(&execs).Error
+	return execs, err
+}
 func (r *workflowExecutionRepo) Update(e *domain.WorkflowExecution) error { return r.db.Save(e).Error }
 
 type stepExecutionRepo struct{ db *gorm.DB }
+
 func (r *stepExecutionRepo) Create(s *domain.StepExecution) error { return r.db.Create(s).Error }
 func (r *stepExecutionRepo) Update(s *domain.StepExecution) error { return r.db.Save(s).Error }
-func (r *stepExecutionRepo) ListByExecution(executionID uint) ([]domain.StepExecution, error) { var steps []domain.StepExecution; err := r.db.Where("execution_id = ?", executionID).Find(&steps).Error; return steps, err }
+func (r *stepExecutionRepo) ListByExecution(executionID uint) ([]domain.StepExecution, error) {
+	var steps []domain.StepExecution
+	err := r.db.Where("execution_id = ?", executionID).Find(&steps).Error
+	return steps, err
+}
 
 // 抑制未使用导入警告
 var _ = time.Now

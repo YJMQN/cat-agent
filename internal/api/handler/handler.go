@@ -25,6 +25,11 @@ type Handlers struct {
 
 	// 模型配置（替代环境变量）
 	ModelConfig *ModelConfigHandler
+	// 新增功能处理器
+	UserProfile   *UserProfileHandler
+	Feedback      *FeedbackHandler
+	Evaluation    *EvaluationHandler
+	Observability *ObservabilityHandler
 }
 
 // NewHandlers 创建所有处理器
@@ -48,5 +53,10 @@ func NewHandlers(svc *service.Services, repo *repository.Repository) *Handlers {
 
 		// 模型配置
 		ModelConfig: NewModelConfigHandler(repo),
+		// 新增功能处理器初始化
+		UserProfile:   NewUserProfileHandler(svc.UserProfile),
+		Feedback:      NewFeedbackHandler(svc.Feedback),
+		Evaluation:    NewEvaluationHandler(svc.Evaluation),
+		Observability: NewObservabilityHandler(svc.Observability),
 	}
 }

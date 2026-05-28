@@ -24,6 +24,18 @@ type Services struct {
 	Export      *ExportService      // 对话导出
 	RAG         *RAGService         // RAG文档检索
 	TokenBudget *TokenBudgetService // Token预算监控
+
+	// ========== 功能1-5：新增服务 ==========
+	// 功能1：用户画像
+	UserProfile *UserProfileService
+	// 功能2：情景记忆
+	EpisodicMemory *EpisodicMemoryService
+	// 功能3：反馈系统
+	Feedback *FeedbackService
+	// 功能4：Agent评估
+	Evaluation *AgentEvaluationService
+	// 功能5：可观测性
+	Observability *ObservabilityService
 }
 
 // NewServices 创建所有服务实例
@@ -41,6 +53,10 @@ func NewServices(repo *repository.Repository, cfg *config.Config) *Services {
 	// 初始化聊天服务
 	chatService := NewChatService(repo, openaiProvider, localProvider, toolRegistry, cfg)
 
+	// 初始化可观测性服务并注入到聊天服务
+	observabilityService := NewObservabilityService(repo)
+	chatService.SetObservabilityService(observabilityService)
+
 	return &Services{
 		Auth:        NewAuthService(repo, cfg),
 		Agent:       NewAgentService(repo, openaiProvider, localProvider, toolRegistry),
@@ -57,6 +73,13 @@ func NewServices(repo *repository.Repository, cfg *config.Config) *Services {
 		Export:      NewExportService(repo, cfg),
 		RAG:         NewRAGService(repo, cfg),
 		TokenBudget: NewTokenBudgetService(repo),
+
+		// ========== 功能1-5：初始化新服务 ==========
+		UserProfile:    NewUserProfileService(repo),
+		EpisodicMemory: NewEpisodicMemoryService(repo, chatService),
+		Feedback:       NewFeedbackService(repo),
+		Evaluation:     NewAgentEvaluationService(repo),
+		Observability:  observabilityService,
 	}
 }
 

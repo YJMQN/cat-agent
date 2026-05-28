@@ -307,4 +307,12 @@ func RegisterEnhancedRoutes(r *gin.RouterGroup, handlers *Handlers) {
 		mcfg.PUT("/:provider", handlers.ModelConfig.Update)
 		mcfg.DELETE("/:provider", handlers.ModelConfig.Delete)
 	}
+
+	// Register feature routes (profile/feedback/evaluation/observability)
+	RegisterFeatureRoutes(r, handlers)
+}
+
+// Also register feature routes (profile/feedback/evaluation/observability)
+func init() {
+	// noop: keep for compile-time; actual registration is done via RegisterEnhancedRoutes at runtime
 }

@@ -26,6 +26,7 @@ type ChatService struct {
 	cfg                *config.Config
 	pendingApprovals   map[string]*PendingToolApproval
 	pendingApprovalsMu sync.Mutex
+	observability      *ObservabilityService
 }
 
 type PendingToolApproval struct {
@@ -55,6 +56,11 @@ func NewChatService(
 	}
 }
 
+// SetObservabilityService 设置可观测性服务（可选）
+func (s *ChatService) SetObservabilityService(obs *ObservabilityService) {
+	s.observability = obs
+}
+
 // ChatInput 对话输入
 type ChatInput struct {
 	AgentID   uint   `json:"agent_id"`
@@ -71,6 +77,13 @@ type ChatInput struct {
 type ChatOutput struct {
 	SessionID uint                 `json:"session_id"`
 	Events    []domain.StreamEvent `json:"events,omitempty"`
+}
+
+// ModelCallStats 模型调用统计
+type ModelCallStats struct {
+	LatencyMs    int64 // 单次模型调用延迟（毫秒）
+	InputTokens  int   // 本次调用的输入tokens
+	OutputTokens int   // 本次调用的输出tokens
 }
 
 // HandleChat 处理对话请求 - Agent核心循环
@@ -95,6 +108,16 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 	agentCfg, err := s.repo.Agent.GetByID(input.AgentID)
 	if err != nil {
 		return fmt.Errorf("Agent配置不存在: %w", err)
+	}
+
+	// 创建执行轨迹（可观测性）
+	var traceID string
+	if s.observability != nil {
+		if t, err := s.observability.CreateExecutionTrace(input.UserID, session.ID, input.AgentID); err == nil && t != nil {
+			traceID = t.TraceID
+			// 将 trace_id 注入 context 以便后续span可关联
+			ctx = context.WithValue(ctx, "trace_id", traceID)
+		}
 	}
 
 	// ========== Step 4: 保存用户消息 ==========
@@ -137,6 +160,9 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 
 	// ========== Step 9: Agent循环 - 模型调用 + 工具执行 ==========
 	maxIterations := 10 // 防止无限循环
+	totalModelLatency := int64(0)
+	totalInputTokens := 0
+
 	for i := 0; i < maxIterations; i++ {
 		req := &model.ChatRequest{
 			Model:       resolvedModelName,
@@ -147,16 +173,24 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 			Stream:      eventCh != nil,
 		}
 
+		var stats *ModelCallStats
+		var err error
 		if eventCh != nil {
 			// 流式模式
-			err = s.handleStreamResponse(ctx, mdl, req, messages, session, agentCfg, eventCh)
+			stats, err = s.handleStreamResponse(ctx, mdl, req, messages, session, agentCfg, eventCh)
 		} else {
 			// 同步模式
-			err = s.handleSyncResponse(ctx, mdl, req, messages, session, agentCfg, eventCh)
+			stats, err = s.handleSyncResponse(ctx, mdl, req, messages, session, agentCfg, eventCh)
 		}
 
 		if err != nil {
 			return err
+		}
+
+		// 累积模型调用统计
+		if stats != nil {
+			totalModelLatency += stats.LatencyMs
+			totalInputTokens += stats.InputTokens
 		}
 
 		// 检查最后一条消息是否包含工具调用
@@ -177,7 +211,27 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 				}
 			}
 
+			// 记录工具调用span
+			var span *domain.TraceSpan
+			var toolStartTime time.Time
+			if s.observability != nil && traceID != "" {
+				toolStartTime = time.Now()
+				sp, _ := s.observability.AddTraceSpan(traceID, "", "tool_call", tc.Function.Name, map[string]interface{}{"args": tc.Function.Arguments}, nil)
+				span = sp
+			}
+
 			event, approvalID, err := s.executeTool(ctx, tc, session.ID)
+
+			if span != nil && s.observability != nil {
+				// 完成span并记录工具指标
+				latencyMs := time.Since(toolStartTime).Milliseconds()
+				tstatus := "success"
+				if err != nil {
+					tstatus = "failure"
+				}
+				_ = s.observability.FinishTraceSpan(span.SpanID, tstatus, "")
+				_ = s.observability.RecordToolMetrics(tc.Function.Name, latencyMs, err == nil)
+			}
 			if err != nil {
 				return err
 			}
@@ -223,6 +277,18 @@ func (s *ChatService) HandleChat(ctx context.Context, input *ChatInput, eventCh 
 	// ========== Step 11: 异步更新记忆 ==========
 	go s.updateMemory(input.UserID, session.ID, sanitizedContent)
 
+	// 完成执行轨迹（记录真实的延迟和token统计）
+	if s.observability != nil && traceID != "" {
+		stepCount := len(messages)
+		toolCallCount := 0
+		for _, m := range messages {
+			if m.Role == "tool" {
+				toolCallCount++
+			}
+		}
+		_ = s.observability.FinishExecutionTrace(traceID, "success", stepCount, toolCallCount, totalInputTokens, session.TokenUsed, int(totalModelLatency))
+	}
+
 	return nil
 }
 
@@ -235,11 +301,24 @@ func (s *ChatService) handleStreamResponse(
 	session *domain.Session,
 	agentCfg *domain.AgentConfig,
 	eventCh chan<- domain.StreamEvent,
-) error {
+) (*ModelCallStats, error) {
 	_ = agentCfg
+	// 在可观测性中添加模型调用span
+	var modelSpan *domain.TraceSpan
+	var modelStartTime time.Time
+	if s.observability != nil {
+		modelStartTime = time.Now()
+		if v := ctx.Value("trace_id"); v != nil {
+			if tid, ok := v.(string); ok && tid != "" {
+				sp, _ := s.observability.AddTraceSpan(tid, "", "model_call", req.Model, map[string]interface{}{"messages_len": len(req.Messages)}, nil)
+				modelSpan = sp
+			}
+		}
+	}
+
 	chunks, err := mdl.StreamChat(ctx, req)
 	if err != nil {
-		return fmt.Errorf("模型流式调用失败: %w", err)
+		return nil, fmt.Errorf("模型流式调用失败: %w", err)
 	}
 
 	var fullContent string
@@ -313,7 +392,32 @@ func (s *ChatService) handleStreamResponse(
 	session.TokenUsed += totalTokens
 	s.repo.Session.Update(session)
 
-	return nil
+	// 完成模型调用span并记录模型指标
+	if modelSpan != nil && s.observability != nil {
+		_ = s.observability.FinishTraceSpan(modelSpan.SpanID, "success", "")
+		// 估算输入tokens（粗略估算：消息长度 / 4）
+		inputTokens := 0
+		for _, msg := range req.Messages {
+			inputTokens += len(msg.Content) / 4
+		}
+		latencyMs := time.Since(modelStartTime).Milliseconds()
+		_ = s.observability.RecordModelMetrics(req.Model, "unknown", latencyMs, inputTokens, totalTokens, 0.95)
+	}
+
+	return &ModelCallStats{
+		LatencyMs:    time.Since(modelStartTime).Milliseconds(),
+		InputTokens:  estimateInputTokens(req.Messages),
+		OutputTokens: totalTokens,
+	}, nil
+}
+
+// estimateInputTokens 估算输入tokens
+func estimateInputTokens(messages []model.Message) int {
+	total := 0
+	for _, msg := range messages {
+		total += len(msg.Content) / 4
+	}
+	return total
 }
 
 // handleSyncResponse 处理同步响应
@@ -325,11 +429,24 @@ func (s *ChatService) handleSyncResponse(
 	session *domain.Session,
 	agentCfg *domain.AgentConfig,
 	eventCh chan<- domain.StreamEvent,
-) error {
+) (*ModelCallStats, error) {
 	_ = agentCfg
+	// 在可观测性中添加模型调用span
+	var modelSpan *domain.TraceSpan
+	var modelStartTime time.Time
+	if s.observability != nil {
+		modelStartTime = time.Now()
+		if v := ctx.Value("trace_id"); v != nil {
+			if tid, ok := v.(string); ok && tid != "" {
+				sp, _ := s.observability.AddTraceSpan(tid, "", "model_call", req.Model, map[string]interface{}{"messages_len": len(req.Messages)}, nil)
+				modelSpan = sp
+			}
+		}
+	}
+
 	resp, err := mdl.Chat(ctx, req)
 	if err != nil {
-		return fmt.Errorf("模型调用失败: %w", err)
+		return nil, fmt.Errorf("模型调用失败: %w", err)
 	}
 
 	assistantMsg := model.Message{
@@ -362,7 +479,19 @@ func (s *ChatService) handleSyncResponse(
 		}
 	}
 
-	return nil
+	if modelSpan != nil && s.observability != nil {
+		_ = s.observability.FinishTraceSpan(modelSpan.SpanID, "success", "")
+		// 估算输入tokens（粗略估算：消息长度 / 4）
+		inputTokens := estimateInputTokens(req.Messages)
+		latencyMs := time.Since(modelStartTime).Milliseconds()
+		_ = s.observability.RecordModelMetrics(req.Model, "unknown", latencyMs, inputTokens, resp.Tokens, 0.95)
+	}
+
+	return &ModelCallStats{
+		LatencyMs:    time.Since(modelStartTime).Milliseconds(),
+		InputTokens:  estimateInputTokens(req.Messages),
+		OutputTokens: resp.Tokens,
+	}, nil
 }
 
 // executeTool 执行工具调用

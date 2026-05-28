@@ -53,6 +53,27 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		&domain.TokenBudget{},
 		// 全局模型配置
 		&domain.GlobalModelConfig{},
+		// ========== 功能1-5：全新模块 ==========
+		// 功能1：用户画像系统
+		&domain.UserProfile{},
+		&domain.ProfileDimension{},
+		&domain.OnboardingQuestion{},
+		&domain.ProfileUpdate{},
+		// 功能2：情景记忆增强
+		&domain.EpisodicMemory{},
+		// 功能3：反馈系统
+		&domain.UserFeedback{},
+		&domain.ImplicitFeedback{},
+		&domain.FeedbackAnalysis{},
+		// 功能4：Agent评估框架
+		&domain.AgentMetrics{},
+		&domain.EvaluationResult{},
+		&domain.DimensionalScore{},
+		// 功能5：可观测性
+		&domain.ExecutionTrace{},
+		&domain.TraceSpan{},
+		&domain.ToolMetrics{},
+		&domain.ModelMetrics{},
 	); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
